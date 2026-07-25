@@ -1,10 +1,12 @@
 /**
- * The inference providers Settings shows a key field for.
+ * The inference providers Settings shows a key field for. All four are always
+ * present — there is no add/remove.
  *
- * All four are always present — there is no add/remove — but only the ones with
- * `supported: true` have an adapter behind them, so only those can list models or
- * run a turn. The rest exist so a key can be stored ahead of the adapter landing,
- * and are marked in the UI rather than silently failing (PRD §14.1).
+ * `catalogueAuth` exists because the four disagree about how a key travels: a
+ * bearer token for the OpenAI-shaped two, `x-api-key` plus a version header for
+ * Anthropic, and `x-goog-api-key` for Gemini. Getting this wrong reads as an
+ * auth failure rather than a wiring mistake, so it's declared rather than
+ * guessed at the call site.
  */
 export type ProviderId = "openrouter" | "openai" | "anthropic" | "google";
 
@@ -13,10 +15,12 @@ export type ProviderDescriptor = {
   label: string;
   /** Shown in the key field before anything is typed, so the expected shape is obvious. */
   keyPlaceholder: string;
-  /** Catalogue endpoint, or null when there's no adapter to read it with yet. */
+  /** Catalogue endpoint, or null when the provider publishes no list. */
   modelsUrl: string | null;
-  /** Whether a turn can actually run against this provider today. */
-  supported: boolean;
+  /** How the key is presented to the catalogue endpoint. */
+  catalogueAuth: "bearer" | "anthropic" | "google";
+  /** Whether the catalogue can be read without a key. Only OpenRouter's can. */
+  catalogueNeedsKey: boolean;
 };
 
 export const PROVIDERS: readonly ProviderDescriptor[] = [
@@ -25,11 +29,33 @@ export const PROVIDERS: readonly ProviderDescriptor[] = [
     label: "OpenRouter",
     keyPlaceholder: "sk-or-v1-…",
     modelsUrl: "https://openrouter.ai/api/v1/models",
-    supported: true,
+    catalogueAuth: "bearer",
+    catalogueNeedsKey: false,
   },
-  { id: "openai", label: "OpenAI", keyPlaceholder: "sk-…", modelsUrl: null, supported: false },
-  { id: "anthropic", label: "Anthropic", keyPlaceholder: "sk-ant-…", modelsUrl: null, supported: false },
-  { id: "google", label: "Google", keyPlaceholder: "AIza…", modelsUrl: null, supported: false },
+  {
+    id: "openai",
+    label: "OpenAI",
+    keyPlaceholder: "sk-…",
+    modelsUrl: "https://api.openai.com/v1/models",
+    catalogueAuth: "bearer",
+    catalogueNeedsKey: true,
+  },
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    keyPlaceholder: "sk-ant-…",
+    modelsUrl: "https://api.anthropic.com/v1/models",
+    catalogueAuth: "anthropic",
+    catalogueNeedsKey: true,
+  },
+  {
+    id: "google",
+    label: "Google Gemini",
+    keyPlaceholder: "AIza…",
+    modelsUrl: "https://generativelanguage.googleapis.com/v1beta/models",
+    catalogueAuth: "google",
+    catalogueNeedsKey: true,
+  },
 ];
 
 export function describeProvider(id: ProviderId): ProviderDescriptor {

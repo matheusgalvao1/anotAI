@@ -1,17 +1,10 @@
-import { fetch as expoFetch } from "expo/fetch";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  AGENT_CONFIG,
-  AgentProviderError,
-  CanonicalMessage,
-  NoteStoreError,
-  OpenRouterProvider,
-  runTurn,
-  TURN_TIMEOUT,
-} from "../agent";
+import { AGENT_CONFIG, AgentProviderError, CanonicalMessage, NoteStoreError, runTurn, TURN_TIMEOUT } from "../agent";
 import { FileNoteStore } from "../notes/agentNoteStore";
 import { ChangedRange, changedRange } from "../notes/changedRange";
 import { deriveTitleAndPreview } from "../notes/title";
+import { buildProvider } from "../settings/buildProvider";
+import { ProviderId } from "../settings/providers";
 import { getProviderKey, getSelectedModel } from "../settings/secureSettings";
 
 const STATUS_CLEAR_MS = 30_000;
@@ -65,18 +58,6 @@ type Params = {
   onStorageError: (message: string) => void;
 };
 
-/**
- * `expo/fetch` is passed in explicitly rather than left to `globalThis.fetch`.
- * React Native's own fetch is `whatwg-fetch` over XHR and its `Response` exposes
- * no `body`, so SSE can't be read from it. Expo SDK 57 does swap the global for
- * its streaming implementation, but that's an implicit side effect gated on
- * `EXPO_PUBLIC_USE_RN_FETCH` — and the agent core is deliberately
- * framework-free, so it must not depend on an Expo runtime patch it can't see.
- */
-function buildProvider(apiKey: string, model: string): OpenRouterProvider {
-  return new OpenRouterProvider({ apiKey, model, title: "anotAI", fetch: expoFetch });
-}
-
 function describeTurnError(err: unknown): string {
   if (err instanceof NoteStoreError) return err.message;
   if (err instanceof AgentProviderError) {
@@ -118,7 +99,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
 
   const historyRef = useRef<CanonicalMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
-  const credentialsRef = useRef<{ apiKey: string; model: string } | null>(null);
+  const credentialsRef = useRef<{ providerId: ProviderId; apiKey: string; model: string } | null>(null);
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -132,7 +113,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
         setDisabledReason("Add a provider and choose a model in Settings to enable AI editing.");
         return;
       }
-      credentialsRef.current = { apiKey, model: selection.modelId };
+      credentialsRef.current = { providerId: selection.providerId, apiKey, model: selection.modelId };
       setDisabledReason(null);
     })();
     return () => {
@@ -197,13 +178,13 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
       setTransientStatus({ kind: "working", text: "Thinking…" });
 
       try {
-        const { apiKey, model } = credentialsRef.current;
+        const { providerId, apiKey, model } = credentialsRef.current;
         const result = await runTurn({
           prompt,
           noteTitle: deriveTitleAndPreview(bodyRef.current).title,
           store: new FileNoteStore(noteId),
           history: historyRef.current,
-          provider: buildProvider(apiKey, model),
+          provider: buildProvider(providerId, apiKey, model),
           signal: controller.signal,
           onNoteWritten: (before, after) => {
             const range = changedRange(before, after);

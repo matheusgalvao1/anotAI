@@ -182,10 +182,6 @@ export function SettingsScreen({ onBack }: Props) {
 
   const handleValidate = async (id: ProviderId) => {
     const provider = describeProvider(id);
-    if (!provider.supported) {
-      setFeedback({ kind: "error", message: `${provider.label} isn't supported yet.` });
-      return;
-    }
     const key = (keys[id] ?? "").trim();
     if (!key) {
       setFeedback({ kind: "error", message: "Enter a key first." });
@@ -204,7 +200,7 @@ export function SettingsScreen({ onBack }: Props) {
     }
 
     setValidating(id);
-    const result = await validateApiKey(key, selection.modelId);
+    const result = await validateApiKey(id, key, selection.modelId);
     setValidating(null);
     setFeedback(result.ok ? { kind: "ok", message: "Key and model work." } : { kind: "error", message: result.message });
   };
@@ -257,8 +253,6 @@ export function SettingsScreen({ onBack }: Props) {
             <View key={provider.id} style={styles.providerBlock}>
               <View style={styles.providerHeader}>
                 <Text style={styles.providerName}>{provider.label}</Text>
-                {/* State, not explanation: this one's key can be stored but not used yet. */}
-                {!provider.supported && <Text style={styles.badge}>not supported yet</Text>}
               </View>
               <View style={styles.inputRow}>
                 <TextInput
@@ -313,7 +307,6 @@ export function SettingsScreen({ onBack }: Props) {
                 options: PROVIDERS.map((provider) => ({
                   value: provider.id,
                   label: provider.label,
-                  detail: provider.supported ? undefined : "not supported yet",
                 })),
               },
             ]}
@@ -411,7 +404,6 @@ const makeStyles = (colors: Palette) =>
     providerBlock: { gap: 8 },
     providerHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
     providerName: { fontSize: 14, fontWeight: "600", color: colors.text },
-    badge: { fontSize: 11, color: colors.textMuted },
     inputRow: { flexDirection: "row", alignItems: "center", gap: 6 },
     inputFlex: { flex: 1 },
     inputIconButton: { padding: 4 },

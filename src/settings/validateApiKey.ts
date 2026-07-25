@@ -1,16 +1,13 @@
-import { fetch as expoFetch } from "expo/fetch";
-import { OpenRouterProvider } from "../agent";
+import { buildProvider } from "./buildProvider";
+import { ProviderId } from "./providers";
 
 export type ValidationResult = { ok: true } | { ok: false; message: string };
 
 const VALIDATION_TIMEOUT_MS = 15_000;
 
 /** One cheap request to confirm a key/model pair actually works (PRD §7.7). */
-export async function validateApiKey(apiKey: string, model: string): Promise<ValidationResult> {
-  // `fetch` is injected for the same reason useAgentTurn injects it: RN's own
-  // fetch exposes no streaming body, and relying on Expo's global replacement is
-  // an invisible dependency the agent core must not carry (see AGENTS.md).
-  const provider = new OpenRouterProvider({ apiKey, model, title: "anotAI", fetch: expoFetch });
+export async function validateApiKey(providerId: ProviderId, apiKey: string, model: string): Promise<ValidationResult> {
+  const provider = buildProvider(providerId, apiKey, model);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS);
 

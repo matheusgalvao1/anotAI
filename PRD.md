@@ -10,7 +10,7 @@
 
 anotAI is a local-first notes app for iOS and Android with a built-in AI editor. Notes are plain markdown files on the device. A floating prompt bar lets the user instruct an AI to edit the note they currently have open — "turn this into a checklist", "tighten the second paragraph", "add a conclusion". The AI does not chat; it acts on the note and gets out of the way.
 
-The agent loop runs entirely inside the app. The only network traffic is LLM inference, sent directly to OpenRouter using an API key the user supplies. There is no backend, no account, and no telemetry.
+The agent loop runs entirely inside the app. The only network traffic is LLM inference, sent directly to whichever provider the user configured — OpenRouter, OpenAI, Anthropic or Google Gemini — using an API key they supply. There is no backend, no account, and no telemetry.
 
 **Working name:** anotAI (from *anota aí*). In use throughout the project and the repo; not formally locked as a final brand name.
 
@@ -23,7 +23,7 @@ The agent loop runs entirely inside the app. The only network traffic is LLM inf
 | G1 | Feel like a fast, ordinary notes app first. The AI is additive, never in the way. |
 | G2 | Notes are user-owned markdown files. No proprietary format, no database of record. |
 | G3 | All agent logic ships in the app. Only LLM inference leaves the device. |
-| G4 | Work acceptably across a wide range of OpenRouter models, including weak ones. |
+| G4 | Work acceptably across a wide range of models and providers, including weak ones. |
 | G5 | No edit is ever unrecoverable. One undo reverts a whole agent turn. |
 
 ### Non-goals for v1
@@ -37,7 +37,7 @@ Explicitly out of scope, with the deferral rationale:
 - **Cloud sync, backup, sharing, export.** No sync layer of any kind.
 - **Attachments,** images, drawings, voice, scanning.
 - **Collaboration,** sharing, multi-device.
-- **Custom / non-OpenRouter providers.** OpenRouter only.
+- ~~**Custom / non-OpenRouter providers.** OpenRouter only.~~ **Reversed.** OpenRouter, OpenAI, Anthropic and Google Gemini all ship adapters (§14.1). Only OpenRouter is verified against a live API; the other three are covered by deterministic wire-format tests written from the documented protocols.
 
 ---
 
@@ -411,7 +411,7 @@ Clears on the next prompt, on manual typing, or after 30 s. Never accumulates hi
 
 ### 7.7 Settings
 - **Appearance** — Light / Dark / System.
-- **API keys** — one field per provider, always all four present: OpenRouter, OpenAI, Anthropic, Google. No adding or removing. Each has reveal, paste and check buttons. Only OpenRouter has an adapter; the rest are marked `not supported yet` and can hold a key ahead of one landing.
+- **API keys** — one field per provider, always all four present: OpenRouter, OpenAI, Anthropic, Google Gemini. No adding or removing. Each has reveal, paste and check buttons. All four have working adapters (§14.1). Only OpenRouter's catalogue is readable without a key; the others say so rather than returning a bare 401.
 - **Model** — two dropdowns: provider, then model. The model list is scoped to the chosen provider, so it is flat and alphabetical rather than grouped. Changing provider clears a model the previous one served, since it cannot be served by the new one.
 - **No Save button.** Keys persist on a 500 ms debounce, matching the editor's own, and are flushed when the screen closes so a key typed in the last half-second isn't lost. The model selection persists the moment it's picked.
 - **Check** — the icon button in each key row. Needs a model chosen for that provider, since a key can only be checked against a model.
@@ -545,13 +545,25 @@ v1 is done when:
 
 Three planned features, ordered by cost-to-value. Only §14.1 imposes any v1 obligation, and it is already absorbed by the provider interface in §6.11.
 
-### 14.1 Multi-provider support — v2.0
+### 14.1 Multi-provider support — **shipped**
 
-Direct support for OpenAI, Anthropic, and Google alongside OpenRouter.
+OpenRouter, OpenAI, Anthropic and Google Gemini all ship adapters implementing `Provider` (§6.11). The prediction held: the loop, tools, compaction and UI were untouched, and each provider is an additive file.
 
-**Work:** one adapter per provider implementing `Provider` (§6.11), a provider picker in Settings, a key per provider in secure storage, and a per-provider curated model list. The agent loop, tools, compaction, and UI are untouched.
+**How the four divide up.** OpenRouter *is* an OpenAI-compatible endpoint, so it and OpenAI are the same implementation (`openaiCompatible.ts`) with a different base URL and headers. Anthropic and Google are separate protocols and have their own adapters. Shared network concerns — cancellation detection, SSE event framing, HTTP status mapping — live in `transport.ts` so four adapters can't drift on the parts that have already cost debugging time.
 
-**Why the v1 interface matters:** the three APIs differ in message shape, in how the system prompt is passed, in tool-call representation, and in streaming events. With the adapter boundary this is additive; without it, it is a rewrite of the core loop.
+**What differs per provider, all of it load-bearing:**
+
+| | System prompt | Tool calls | Tool results | Auth header |
+|---|---|---|---|---|
+| OpenRouter / OpenAI | `system` message | `tool_calls` deltas, assembled by `index` | `tool` role with `tool_call_id` | `Authorization: Bearer` |
+| Anthropic | top-level `system` field | `tool_use` blocks; args stream as `partial_json` per block index | `tool_result` block inside a **user** message | `x-api-key` + `anthropic-version` |
+| Google Gemini | `systemInstruction` field | `functionCall` parts, complete in one part | `functionResponse` keyed **by name** | `x-goog-api-key` |
+
+**Gemini has no tool-call ids.** The canonical format needs one to correlate a result with its call, so ids are synthesised on the way in (`name-index`, unique within a turn) and mapped back to function names on the way out by walking the preceding assistant tool calls. This is the sharpest edge in the four adapters.
+
+**Model catalogues differ too, and only OpenRouter publishes tool-calling support** (`supported_parameters`). The other three are filtered by id against families known to support tools — an imperfect heuristic, chosen because offering a model that fails on its first tool call is worse, as is listing embedding and audio models that can't hold a conversation. Gemini's ids also carry a `models/` prefix that has to be stripped or the request path doubles it. Only OpenRouter's catalogue is readable without a key.
+
+**Verification status.** Only OpenRouter is verified against a live API (`openrouter.live.test.ts`). The other three are covered by deterministic tests written from the documented wire formats — request shaping, SSE grammar, tool-call assembly, error mapping — which is the same class of coverage that caught the real OpenRouter bugs, but it is **not** proof that the live APIs behave as documented. Extending `npm run test:live` with a key per provider is the remaining gap.
 
 **Open points**
 - Model capability discovery. OpenRouter exposes `/models`; direct providers each differ. Tool-calling support is not uniformly advertised and may need a curated allowlist per provider.

@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { describeProvider, ProviderId } from "./providers";
-import { CatalogueModel, parseOpenRouterModels } from "./modelList";
+import { CatalogueModel, parseModels } from "./modelList";
 
 const CACHE_KEY_PREFIX = "modelCatalogue:";
 const FETCH_TIMEOUT_MS = 15_000;
@@ -24,6 +24,19 @@ async function writeCache(providerId: ProviderId, models: CatalogueModel[]): Pro
   }
 }
 
+/** Each provider presents its key differently; guessing produces a 401 that looks like a bad key. */
+function catalogueHeaders(auth: "bearer" | "anthropic" | "google", apiKey: string | null): Record<string, string> | undefined {
+  if (!apiKey) return undefined;
+  switch (auth) {
+    case "bearer":
+      return { Authorization: `Bearer ${apiKey}` };
+    case "anthropic":
+      return { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+    case "google":
+      return { "x-goog-api-key": apiKey };
+  }
+}
+
 export type CatalogueResult = {
   models: CatalogueModel[];
   /** True when the list came from cache because the network didn't answer. */
@@ -43,10 +56,13 @@ export type CatalogueResult = {
  */
 export async function loadModels(providerId: ProviderId, apiKey: string | null): Promise<CatalogueResult> {
   const provider = describeProvider(providerId);
-  // No adapter means no catalogue to read and no turn to run. Say so plainly
-  // rather than firing a request that can only fail.
-  if (!provider.supported || provider.modelsUrl === null) {
-    return { models: [], stale: false, error: `${provider.label} isn't supported yet.` };
+  if (provider.modelsUrl === null) {
+    return { models: [], stale: false, error: `${provider.label} doesn't publish a model list.` };
+  }
+  // Only OpenRouter's catalogue is public. Saying so beats a 401 the user has to
+  // interpret.
+  if (provider.catalogueNeedsKey && !apiKey) {
+    return { models: [], stale: false, error: `Enter your ${provider.label} key to load its models.` };
   }
 
   const cached = await readCache(providerId);
@@ -55,12 +71,12 @@ export async function loadModels(providerId: ProviderId, apiKey: string | null):
 
   try {
     const response = await fetch(provider.modelsUrl, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+      headers: catalogueHeaders(provider.catalogueAuth, apiKey),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`The provider returned HTTP ${response.status}.`);
 
-    const models = parseOpenRouterModels(await response.json());
+    const models = parseModels(providerId, await response.json());
     if (models.length === 0) throw new Error("The provider returned no tool-calling models.");
 
     await writeCache(providerId, models);
