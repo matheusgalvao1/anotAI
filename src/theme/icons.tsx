@@ -19,11 +19,13 @@ export type IconName =
   | "back"
   | "clipboard"
   | "close"
+  | "collapse"
   | "conceal"
   | "dark"
   | "delete"
   | "dismissKeyboard"
   | "edit"
+  | "expand"
   | "key"
   | "light"
   | "model"
@@ -46,6 +48,7 @@ const FEATHER = {
   back: "chevron-left",
   clipboard: "clipboard",
   close: "x",
+  collapse: "chevron-up",
   conceal: "eye-off",
   dark: "moon",
   delete: "trash-2",
@@ -53,6 +56,7 @@ const FEATHER = {
   // rather than describing the keyboard going away.
   dismissKeyboard: "check",
   edit: "edit-3",
+  expand: "chevron-down",
   key: "key",
   light: "sun",
   model: "cpu",

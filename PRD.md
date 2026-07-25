@@ -425,7 +425,7 @@ Clears on the next prompt, on manual typing, or after 30 s. Never accumulates hi
 
 **Storage is keyed by provider** (`src/settings/secureSettings.ts`). Keys live at `<PROVIDER>_API_KEY`, which is why the upgrade needs no key migration: the single key this app used to store was already at `OPENROUTER_API_KEY`. The model selection carries its provider id and is read through to the legacy `OPENROUTER_DEFAULT_MODEL` when absent — a read-through fallback, not a destructive migration, so a downgrade doesn't lose it.
 
-**Pickers are `Modal` from React Native core**, not `@react-native-picker/picker`: that is a native module, so it would force a dev-client rebuild on every contributor, and its iOS wheel cannot render grouped sections anyway.
+**Pickers are inline dropdowns that expand in place** (`src/screens/Dropdown.tsx`), capping their own height and scrolling internally — a provider catalogue runs to hundreds of models, so the list cannot simply push the page down. A bottom-sheet modal was tried first and was too heavy an interaction for choosing one value. Not `@react-native-picker/picker` either way: that is a native module, so it would force a dev-client rebuild on every contributor, and its iOS wheel cannot render grouped sections at all.
 
 **Compaction model** (optional, not built) — would default to the main model.
 
