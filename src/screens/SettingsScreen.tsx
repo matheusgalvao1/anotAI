@@ -1,8 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Icon, IconName } from "../theme/icons";
 import {
   clearApiKey,
   getApiKey,
@@ -16,13 +16,33 @@ import { ThemePreference, useTheme } from "../theme/ThemeContext";
 
 const SUGGESTED_MODELS = ["openai/gpt-4o-mini", "anthropic/claude-3.5-haiku", "google/gemini-2.0-flash-001"];
 
-const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: "light", label: "Light", icon: "sunny-outline" },
-  { value: "dark", label: "Dark", icon: "moon-outline" },
-  { value: "system", label: "System", icon: "phone-portrait-outline" },
+const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: IconName }[] = [
+  { value: "light", label: "Light", icon: "light" },
+  { value: "dark", label: "Dark", icon: "dark" },
+  { value: "system", label: "System", icon: "system" },
 ];
 
 type Props = { onBack: () => void };
+
+/**
+ * Must stay at module scope. Defined inside SettingsScreen it was a new
+ * component *type* on every render, so React unmounted and remounted the whole
+ * subtree — including the API key TextInput — on every keystroke, dropping
+ * focus and the keyboard each character.
+ */
+function Section({ icon, title, children }: { icon: IconName; title: string; children: ReactNode }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Icon name={icon} size={17} color={colors.accent} />
+        <Text style={styles.cardTitle}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
 
 type Status =
   | { kind: "idle" }
@@ -74,33 +94,32 @@ export function SettingsScreen({ onBack }: Props) {
     // Reads the clipboard directly via Expo's native module — a different
     // path from the TextInput's own paste gesture, which iOS Simulator's
     // secureTextEntry fields don't always surface reliably.
-    const text = await Clipboard.getStringAsync();
-    if (text) setApiKeyInput(text.trim());
+    const text = (await Clipboard.getStringAsync()).trim();
+    if (!text) {
+      // Silence here is indistinguishable from a broken button. On the
+      // simulator an empty clipboard usually means the host pasteboard never
+      // synced across (see README), not that nothing was copied.
+      setStatus({ kind: "invalid", message: "Clipboard is empty — nothing to paste." });
+      return;
+    }
+    setApiKeyInput(text);
+    setStatus({ kind: "idle" });
   };
-
-  const Section = ({ icon, title, children }: { icon: keyof typeof Ionicons.glyphMap; title: string; children: ReactNode }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Ionicons name={icon} size={19} color={colors.accent} />
-        <Text style={styles.cardTitle}>{title}</Text>
-      </View>
-      {children}
-    </View>
-  );
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.toolbar}>
+        {/* Absolutely positioned so the title is centred on the screen rather
+            than on whatever's left over beside an auto-width back button. */}
+        <Text style={styles.toolbarTitle}>Settings</Text>
         <Pressable onPress={onBack} hitSlop={12} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={26} color={colors.accent} />
+          <Icon name="back" size={24} color={colors.accent} />
           <Text style={styles.backText}>Notes</Text>
         </Pressable>
-        <Text style={styles.toolbarTitle}>Settings</Text>
-        <View style={{ width: 70 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Section icon="color-palette-outline" title="Appearance">
+        <Section icon="appearance" title="Appearance">
           <View style={styles.appearanceRow}>
             {APPEARANCE_OPTIONS.map((option) => {
               const selected = preference === option.value;
@@ -110,7 +129,7 @@ export function SettingsScreen({ onBack }: Props) {
                   onPress={() => setPreference(option.value)}
                   style={[styles.appearanceOption, selected && styles.appearanceOptionSelected]}
                 >
-                  <Ionicons name={option.icon} size={22} color={selected ? colors.accent : colors.textSecondary} />
+                  <Icon name={option.icon} size={21} color={selected ? colors.accent : colors.textSecondary} />
                   <Text style={[styles.appearanceLabel, selected && { color: colors.accent }]}>{option.label}</Text>
                 </Pressable>
               );
@@ -118,7 +137,7 @@ export function SettingsScreen({ onBack }: Props) {
           </View>
         </Section>
 
-        <Section icon="key-outline" title="OpenRouter API key">
+        <Section icon="key" title="OpenRouter API key">
           <View style={styles.inputRow}>
             <TextInput
               value={apiKey}
@@ -131,25 +150,25 @@ export function SettingsScreen({ onBack }: Props) {
               style={[styles.input, styles.inputFlex]}
             />
             <Pressable onPress={() => setKeyVisible((v) => !v)} hitSlop={8} style={styles.inputIconButton}>
-              <Ionicons name={keyVisible ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+              <Icon name={keyVisible ? "conceal" : "reveal"} size={19} color={colors.textSecondary} />
             </Pressable>
             <Pressable onPress={handlePaste} hitSlop={8} style={styles.inputIconButton}>
-              <Ionicons name="clipboard-outline" size={20} color={colors.textSecondary} />
+              <Icon name="clipboard" size={19} color={colors.textSecondary} />
             </Pressable>
           </View>
           <Text style={styles.hint}>Stored in this device's secure keychain. Never sent anywhere except to OpenRouter.</Text>
 
           <View style={styles.buttonRow}>
             <Pressable onPress={handleSave} style={[styles.button, styles.primaryButton]}>
-              <Ionicons name="checkmark" size={16} color={colors.accentText} />
+              <Icon name="save" size={15} color={colors.accentText} />
               <Text style={styles.primaryButtonText}>Save</Text>
             </Pressable>
             <Pressable onPress={handleValidate} style={styles.button}>
-              <Ionicons name="flash-outline" size={16} color={colors.text} />
+              <Icon name="validate" size={15} color={colors.text} />
               <Text style={styles.buttonText}>{status.kind === "validating" ? "Checking…" : "Validate"}</Text>
             </Pressable>
             <Pressable onPress={handleClear} style={styles.button}>
-              <Ionicons name="trash-outline" size={16} color={colors.danger} />
+              <Icon name="delete" size={15} color={colors.danger} />
               <Text style={styles.dangerButtonText}>Clear</Text>
             </Pressable>
           </View>
@@ -159,7 +178,7 @@ export function SettingsScreen({ onBack }: Props) {
           {status.kind === "invalid" && <Text style={styles.errorText}>{status.message}</Text>}
         </Section>
 
-        <Section icon="hardware-chip-outline" title="Model">
+        <Section icon="model" title="Model">
           <TextInput
             value={model}
             onChangeText={setModelInput}
@@ -181,7 +200,7 @@ export function SettingsScreen({ onBack }: Props) {
           </Text>
         </Section>
 
-        <Section icon="information-circle-outline" title="About">
+        <Section icon="about" title="About">
           <Text style={styles.aboutText}>
             anotAI — notes are markdown files stored only on this device. In this mode, nothing you write ever leaves
             the device except the text sent to OpenRouter when you ask the AI to edit a note.
@@ -198,13 +217,13 @@ const makeStyles = (colors: Palette) =>
     toolbar: {
       flexDirection: "row",
       alignItems: "center",
-      justifyContent: "space-between",
+      justifyContent: "center",
       paddingHorizontal: 12,
       paddingVertical: 8,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
-    backButton: { flexDirection: "row", alignItems: "center" },
+    backButton: { position: "absolute", left: 12, flexDirection: "row", alignItems: "center" },
     backText: { color: colors.accent, fontSize: 16, fontWeight: "600", marginLeft: 2 },
     toolbarTitle: { fontSize: 17, fontWeight: "700", color: colors.text },
     content: { padding: 16, gap: 14 },

@@ -1,19 +1,32 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { createNote, deleteNote, listNotes, NoteSummary, purgeExpiredTrash, restoreNote } from "../notes/noteRepository";
 import { formatRelativeTime } from "../notes/relativeTime";
+import { Icon } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { useTheme } from "../theme/ThemeContext";
 
 const UNDO_TIMEOUT_MS = 5000;
+const FAB_SIZE = 62;
+/** Gap between the floating layer and the bottom safe area. */
+const FLOAT_INSET = 20;
 
-type Props = { onOpenNote: (id: string) => void; onOpenSettings: () => void };
+type Props = {
+  onOpenNote: (id: string) => void;
+  onOpenSettings: () => void;
+  /**
+   * Changes whenever a pushed screen is dismissed. This screen is never
+   * unmounted (see App.tsx), so it can't rely on mount to re-read the notes
+   * directory — it re-reads when this token changes instead.
+   */
+  refreshToken: number;
+};
 
-export function NoteListScreen({ onOpenNote, onOpenSettings }: Props) {
+export function NoteListScreen({ onOpenNote, onOpenSettings, refreshToken }: Props) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [notes, setNotes] = useState<NoteSummary[]>([]);
@@ -24,11 +37,14 @@ export function NoteListScreen({ onOpenNote, onOpenSettings }: Props) {
 
   useEffect(() => {
     purgeExpiredTrash();
-    refresh();
     return () => {
       if (undoTimer.current) clearTimeout(undoTimer.current);
     };
-  }, [refresh]);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh, refreshToken]);
 
   const handleCreate = useCallback(() => {
     const id = createNote();
@@ -55,12 +71,14 @@ export function NoteListScreen({ onOpenNote, onOpenSettings }: Props) {
     refresh();
   }, [lastDeleted, refresh]);
 
+  const floatBottom = insets.bottom + FLOAT_INSET;
+
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Notes</Text>
         <Pressable onPress={onOpenSettings} hitSlop={12}>
-          <Ionicons name="settings-outline" size={28} color={colors.textSecondary} />
+          <Icon name="settings" size={24} color={colors.textSecondary} />
         </Pressable>
       </View>
 
@@ -73,12 +91,15 @@ export function NoteListScreen({ onOpenNote, onOpenSettings }: Props) {
         <FlatList
           data={notes}
           keyExtractor={(note) => note.id}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          // Without this the last row sits under the FAB and can't be tapped.
+          contentContainerStyle={{ paddingBottom: floatBottom + FAB_SIZE + 16 }}
           renderItem={({ item }) => (
             <Swipeable
               renderRightActions={(_progress, drag) => (
                 <Animated.View style={{ transform: [{ translateX: drag.interpolate({ inputRange: [-100, 0], outputRange: [0, 100] }) }] }}>
                   <Pressable style={styles.deleteAction} onPress={() => handleDelete(item)}>
-                    <Ionicons name="trash-outline" size={22} color="#fff" />
+                    <Icon name="delete" size={20} color="#fff" />
                     <Text style={styles.deleteActionText}>Delete</Text>
                   </Pressable>
                 </Animated.View>
@@ -100,16 +121,18 @@ export function NoteListScreen({ onOpenNote, onOpenSettings }: Props) {
         />
       )}
 
-      <Pressable style={styles.fab} onPress={handleCreate}>
-        <Ionicons name="add" size={32} color={colors.accentText} />
+      <Pressable style={[styles.fab, { bottom: floatBottom }]} onPress={handleCreate}>
+        <Icon name="add" size={28} color={colors.accentText} />
       </Pressable>
 
       {lastDeleted && (
-        <View style={styles.undoBar}>
+        // Sits above the FAB rather than across it — both used to share
+        // `bottom: 24`, which put "Undo" underneath the button.
+        <View style={[styles.undoBar, { bottom: floatBottom + FAB_SIZE + 12 }]}>
           <Text style={styles.undoText} numberOfLines={1}>
             Deleted "{lastDeleted.title}"
           </Text>
-          <Pressable onPress={handleUndo}>
+          <Pressable onPress={handleUndo} hitSlop={8}>
             <Text style={styles.undoButton}>Undo</Text>
           </Pressable>
         </View>
@@ -137,10 +160,9 @@ const makeStyles = (colors: Palette) =>
     row: {
       paddingHorizontal: 16,
       paddingVertical: 14,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
       backgroundColor: colors.background,
     },
+    separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 16 },
     rowTextContainer: { gap: 4 },
     rowTitle: { fontSize: 16, fontWeight: "600", color: colors.text },
     rowMeta: { fontSize: 13, color: colors.textMuted },
@@ -155,11 +177,10 @@ const makeStyles = (colors: Palette) =>
     deleteActionText: { color: "#fff", fontWeight: "600", fontSize: 12 },
     fab: {
       position: "absolute",
-      right: 20,
-      bottom: 24,
-      width: 62,
-      height: 62,
-      borderRadius: 31,
+      right: FLOAT_INSET,
+      width: FAB_SIZE,
+      height: FAB_SIZE,
+      borderRadius: FAB_SIZE / 2,
       backgroundColor: colors.accent,
       alignItems: "center",
       justifyContent: "center",
@@ -173,9 +194,8 @@ const makeStyles = (colors: Palette) =>
       position: "absolute",
       left: 16,
       right: 16,
-      bottom: 24,
       backgroundColor: colors.text,
-      borderRadius: 8,
+      borderRadius: 10,
       paddingHorizontal: 16,
       paddingVertical: 12,
       flexDirection: "row",

@@ -1,8 +1,14 @@
-import { Ionicons } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Icon, IconName } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { useTheme } from "../theme/ThemeContext";
+import { TurnStatus } from "./useAgentTurn";
+
+const FAB_SIZE = 62;
+const SMALL_SIZE = 44;
+const FLOAT_INSET = 20;
 
 type Props = {
   canUndo: boolean;
@@ -13,19 +19,49 @@ type Props = {
   onCancel: () => void;
   onSubmit: (prompt: string) => void;
   disabledReason: string | null;
+  status: TurnStatus;
+  /** Closing the field ends the exchange, so the model's last reply goes with it. */
+  onClearStatus: () => void;
 };
 
 /**
- * The whole bottom-right floating cluster on the editor screen (PRD §7.3/§7.6).
- * Closed: Redo/Undo stacked above the main FAB. Open: the FAB stays in the
- * same spot and becomes the send button, with a floating card growing to
- * its left for the prompt text.
+ * The whole bottom floating layer on the editor screen (PRD §7.3/§7.4/§7.6):
+ * status line, prompt field, undo/redo, and the main action button.
+ *
+ * Three rules drive the layout:
+ *
+ * - The undo/redo column and the main button never move. Opening the composer
+ *   grows a card to their left rather than replacing them, so nothing jumps and
+ *   undo stays reachable mid-prompt.
+ * - The status line sits in the same column as the prompt field, directly above
+ *   it — not above the whole cluster — and carries no background of its own.
+ * - The main button is only ever four things: AI (closed), send (open, inert
+ *   with no text, live with text), or stop (a turn is running). It is never a
+ *   close button; closing is an outside tap.
  */
-export function AgentFab({ canUndo, canRedo, onUndo, onRedo, busy, onCancel, onSubmit, disabledReason }: Props) {
+export function AgentFab({
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  busy,
+  onCancel,
+  onSubmit,
+  disabledReason,
+  status,
+  onClearStatus,
+}: Props) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const inputRef = useRef<TextInput>(null);
+
+  const trimmed = text.trim();
+  const showComposer = open || busy;
+  /** Open with an empty field: the send button is visible but inert. */
+  const sendInert = open && !busy && !trimmed;
 
   const handleMainPress = () => {
     if (busy) {
@@ -40,92 +76,116 @@ export function AgentFab({ canUndo, canRedo, onUndo, onRedo, busy, onCancel, onS
       setOpen(true);
       return;
     }
-    const trimmed = text.trim();
-    if (trimmed) {
-      onSubmit(trimmed);
-      setText("");
-    }
-    setOpen(false);
+    if (!trimmed) return;
+    onSubmit(trimmed);
+    setText("");
+    // Deliberately stays open, and keeps the keyboard, so a follow-up prompt
+    // needs no extra taps. Only an outside tap closes it.
+    inputRef.current?.focus();
   };
 
-  if (busy) {
-    return (
-      <View style={styles.anchorClosed}>
-        <Pressable style={styles.fabMain} onPress={onCancel}>
-          <ActivityIndicator color={colors.accentText} />
-        </Pressable>
-      </View>
-    );
-  }
-
-  if (open) {
-    return (
-      <View style={styles.anchorOpen}>
-        <View style={styles.composerCard}>
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="Ask AI to edit this note…"
-            placeholderTextColor={colors.textMuted}
-            autoFocus
-            multiline
-            style={styles.composerInput}
-          />
-        </View>
-        <Pressable style={styles.fabMain} onPress={handleMainPress}>
-          <Ionicons name={text.trim() ? "arrow-up" : "close"} size={26} color={colors.accentText} />
-        </Pressable>
-      </View>
-    );
-  }
+  const mainIcon: IconName = busy ? "stop" : open ? "send" : "ai";
 
   return (
-    <View style={styles.anchorClosed}>
-      <Pressable style={styles.fabSmall} disabled={!canRedo} onPress={onRedo}>
-        <Ionicons name="arrow-redo" size={20} color={canRedo ? colors.text : colors.textMuted} />
-      </Pressable>
-      <Pressable style={styles.fabSmall} disabled={!canUndo} onPress={onUndo}>
-        <Ionicons name="arrow-undo" size={20} color={canUndo ? colors.text : colors.textMuted} />
-      </Pressable>
-      <Pressable style={styles.fabMain} onPress={handleMainPress}>
-        <Ionicons name="sparkles" size={26} color={colors.accentText} />
-      </Pressable>
-    </View>
+    <>
+      {/* The only way to close the composer. Mounted just while it's open, so
+          it never intercepts editing otherwise. */}
+      {open && !busy && (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          accessibilityLabel="Close the AI prompt"
+          onPress={() => {
+            setOpen(false);
+            onClearStatus();
+            inputRef.current?.blur();
+          }}
+        />
+      )}
+
+      <View style={[styles.layer, { bottom: insets.bottom + FLOAT_INSET }]} pointerEvents="box-none">
+        <View style={styles.promptColumn} pointerEvents="box-none">
+          {status && (
+            <View style={styles.statusRow} pointerEvents="none">
+              {status.kind === "working" && <ActivityIndicator size="small" color={colors.textSecondary} />}
+              <Text style={[styles.statusText, styles[`status_${status.kind}`]]} numberOfLines={3}>
+                {status.text}
+              </Text>
+            </View>
+          )}
+
+          {showComposer && (
+            <View style={styles.composerCard}>
+              <TextInput
+                ref={inputRef}
+                value={text}
+                onChangeText={setText}
+                placeholder={busy ? "Working…" : "Ask AI to edit this note…"}
+                placeholderTextColor={colors.textMuted}
+                editable={!busy}
+                autoFocus
+                // Single line on purpose: a growing field shifts the whole
+                // cluster and breaks its alignment with the button beside it.
+                // Long prompts scroll horizontally instead.
+                multiline={false}
+                returnKeyType="send"
+                submitBehavior="submit"
+                onSubmitEditing={handleMainPress}
+                style={styles.composerInput}
+              />
+            </View>
+          )}
+        </View>
+
+        <View style={styles.buttonColumn}>
+          <Pressable style={styles.fabSmall} disabled={!canRedo} onPress={onRedo} hitSlop={6}>
+            <Icon name="redo" size={19} color={canRedo ? colors.text : colors.textMuted} />
+          </Pressable>
+          <Pressable style={styles.fabSmall} disabled={!canUndo} onPress={onUndo} hitSlop={6}>
+            <Icon name="undo" size={19} color={canUndo ? colors.text : colors.textMuted} />
+          </Pressable>
+          <Pressable style={[styles.fabMain, sendInert && styles.fabMainInert]} disabled={sendInert} onPress={handleMainPress}>
+            <Icon name={mainIcon} size={busy ? 24 : 26} color={sendInert ? colors.textMuted : colors.accentText} />
+          </Pressable>
+        </View>
+      </View>
+    </>
   );
 }
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
-    anchorClosed: {
-      position: "absolute",
-      right: 20,
-      bottom: 24,
-      alignItems: "center",
-      gap: 12,
-    },
-    anchorOpen: {
+    layer: {
       position: "absolute",
       left: 16,
-      right: 20,
-      bottom: 24,
+      right: FLOAT_INSET,
       flexDirection: "row",
       alignItems: "flex-end",
       gap: 10,
     },
+    /** Status and prompt field share this column so the status sits directly above the field. */
+    promptColumn: { flex: 1, alignItems: "stretch", gap: 6 },
+    buttonColumn: { alignItems: "center", gap: 12 },
     fabSmall: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+      width: SMALL_SIZE,
+      height: SMALL_SIZE,
+      borderRadius: SMALL_SIZE / 2,
       backgroundColor: colors.surface,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
       alignItems: "center",
       justifyContent: "center",
+      // Without a shadow these vanish against note text: `surface` is only a
+      // shade off `background` in the light palette.
+      elevation: 2,
+      shadowColor: "#000",
+      shadowOpacity: 0.12,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
     },
     fabMain: {
-      width: 62,
-      height: 62,
-      borderRadius: 31,
+      width: FAB_SIZE,
+      height: FAB_SIZE,
+      borderRadius: FAB_SIZE / 2,
       backgroundColor: colors.accent,
       alignItems: "center",
       justifyContent: "center",
@@ -135,14 +195,20 @@ const makeStyles = (colors: Palette) =>
       shadowRadius: 5,
       shadowOffset: { width: 0, height: 3 },
     },
+    fabMainInert: {
+      backgroundColor: colors.border,
+      elevation: 0,
+      shadowOpacity: 0,
+    },
     composerCard: {
-      flex: 1,
+      // Exactly the button's height, so bottom-aligning the row also centres
+      // the two on each other — no offset to tune, and none to drift.
+      height: FAB_SIZE,
+      borderRadius: FAB_SIZE / 2,
       backgroundColor: colors.surface,
-      borderRadius: 22,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
-      paddingHorizontal: 16,
-      paddingVertical: 4,
+      paddingHorizontal: 20,
       justifyContent: "center",
       elevation: 4,
       shadowColor: "#000",
@@ -153,7 +219,15 @@ const makeStyles = (colors: Palette) =>
     composerInput: {
       fontSize: 15,
       color: colors.text,
-      maxHeight: 120,
-      paddingVertical: 10,
+      padding: 0,
     },
+    // No surface of its own: it reads as a caption on the prompt field, not a
+    // separate panel.
+    statusRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 6 },
+    statusText: { flex: 1, fontSize: 13, fontWeight: "500" },
+    status_working: { color: colors.textSecondary },
+    status_success: { color: colors.success },
+    status_none: { color: colors.textMuted },
+    status_error: { color: colors.danger },
+    status_cancelled: { color: colors.textMuted },
   });

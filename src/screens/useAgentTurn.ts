@@ -25,6 +25,13 @@ export type AgentTurn = {
   disabledReason: string | null;
   submit: (prompt: string) => Promise<void>;
   cancel: () => void;
+  /**
+   * Drops the status immediately. The 30 s auto-clear is only a backstop for a
+   * status nobody dismissed — closing the prompt field is what normally ends
+   * the conversation, and leaving the reply hanging around after that reads as
+   * a bug (PRD §7.4).
+   */
+  clearStatus: () => void;
 };
 
 type Params = {
@@ -125,6 +132,8 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onStorageE
     if (next) statusTimer.current = setTimeout(() => setStatus(null), STATUS_CLEAR_MS);
   }, []);
 
+  const clearStatus = useCallback(() => setTransientStatus(null), [setTransientStatus]);
+
   const submit = useCallback(
     async (prompt: string) => {
       if (busy || !credentialsRef.current) return;
@@ -184,5 +193,5 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onStorageE
 
   const cancel = useCallback(() => abortRef.current?.abort(), []);
 
-  return { busy, status, disabledReason, submit, cancel };
+  return { busy, status, disabledReason, submit, cancel, clearStatus };
 }

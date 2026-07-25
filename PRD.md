@@ -364,12 +364,15 @@ Secondary benefit, realized immediately: M2 tests run against a scripted mock pr
 ### 7.3 Prompt bar
 - Floating, pinned above the keyboard, collapsed to a single line at rest, placeholder `Ask AI to edit this note…`.
 - Grows to a few lines for longer prompts.
-- Submit sends and clears the field.
-- While a turn runs: spinner, Cancel, editor dimmed and read-only.
+- Submit sends and clears the text but **keeps the field open and focused**, so a follow-up prompt costs no extra taps. Only a tap outside the cluster, or the ✕ (shown when the field is empty), closes it — undo/redo explicitly do not.
+- The undo/redo buttons and the main action button never move between states; opening the field grows a card to their left. Nothing jumps, and undo stays reachable mid-prompt.
+- While a turn runs: spinner, Cancel, editor dimmed and read-only, field still visible but not editable.
 - With no API key: visibly disabled; tapping explains and links to Settings.
 
 ### 7.4 Status line
-Thin, transient, directly under the prompt bar. Single line, truncated with tap-to-expand.
+Thin, transient, directly **above** the prompt bar. Single line, truncated with tap-to-expand.
+
+Originally specified as sitting *under* the prompt bar; moved above it because the prompt bar is itself pinned above the keyboard, so anything below it is the first thing the keyboard covers — exactly the message the user needs while a turn runs. Nothing renders below the prompt bar.
 
 | State | Display |
 |---|---|
@@ -441,7 +444,8 @@ Every case needs a message a non-technical user can act on.
 | Layer | Choice | Note |
 |---|---|---|
 | Framework | **Expo** (managed) + React Native, TypeScript strict | Both platforms, one codebase. |
-| Navigation | Plain component state (list ↔ editor) | Two screens don't justify `expo-router` yet; adopt it when screen count grows (e.g. Settings in M3). |
+| Navigation | Plain component state, list as root with editor/settings pushed over it; one `Animated.Value` drives a horizontal slide + parallax | Three screens still don't justify `expo-router` or `react-navigation` — the latter would add `react-native-screens`, a native module, and force a dev-client rebuild. Adopt a router when deep linking or a back-stack deeper than one level is needed. |
+| Icons | Feather via `@expo/vector-icons`, behind a semantic `Icon` name map (`src/theme/icons.tsx`) | Uniform 2px strokes read lighter than Ionicons' outline set. Screens ask for `"undo"`, not `"corner-up-left"`, so re-skinning the whole app is a one-file change. Feather has no sparkle glyph, so the single AI affordance uses Material Community's `creation`. |
 | Files | `expo-file-system` | Notes as `.md`. |
 | Secure storage | `expo-secure-store` | API key only. |
 | HTTP / streaming | `expo/fetch`, **injected** into `OpenRouterProvider` | Streaming SSE support; RN's default `fetch` is `whatwg-fetch` over XHR and its `Response` exposes no `body` at all, so SSE cannot be read from it. Expo SDK 57 *does* replace `globalThis.fetch` with its streaming implementation, but that is an implicit side effect gated on `EXPO_PUBLIC_USE_RN_FETCH` — so the app passes `expo/fetch` explicitly rather than depending on a global patch the framework-free agent core can't see. **Validate on a physical device early.** |

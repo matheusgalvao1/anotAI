@@ -1,8 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import Markdown from "react-native-markdown-display";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Icon } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { useTheme } from "../theme/ThemeContext";
 import { AgentFab } from "./AgentFab";
@@ -19,9 +19,13 @@ type Props = { noteId: string; onBack: () => void };
 export function NoteEditorScreen({ noteId, onBack }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const markdownStyles = useMemo(() => makeMarkdownStyles(colors), [colors]);
 
   const session = useNoteSession(noteId);
   const [previewing, setPreviewing] = useState(false);
+  // Only a brand-new note should raise the keyboard on open — otherwise it
+  // covers half the note you came to read, plus the whole button cluster.
+  const [autoFocus] = useState(() => session.body.length === 0);
 
   const turn = useAgentTurn({
     noteId,
@@ -42,17 +46,17 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.toolbar}>
         <Pressable onPress={handleBack} hitSlop={12} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={26} color={colors.accent} />
+          <Icon name="back" size={24} color={colors.accent} />
           <Text style={styles.backText}>Notes</Text>
         </Pressable>
         <Pressable onPress={() => setPreviewing((p) => !p)} hitSlop={12}>
-          <Ionicons name={previewing ? "create-outline" : "eye-outline"} size={26} color={colors.text} />
+          <Icon name={previewing ? "edit" : "preview"} size={22} color={colors.text} />
         </Pressable>
       </View>
 
       {session.storageError && (
         <View style={styles.storageBanner}>
-          <Ionicons name="warning-outline" size={20} color={colors.danger} />
+          <Icon name="warning" size={18} color={colors.danger} />
           <Text style={styles.storageBannerText}>{session.storageError}</Text>
           {!session.loadFailed && (
             <Pressable onPress={session.retrySave} hitSlop={8}>
@@ -60,19 +64,21 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
             </Pressable>
           )}
           <Pressable onPress={session.dismissStorageError} hitSlop={8}>
-            <Ionicons name="close" size={20} color={colors.textMuted} />
+            <Icon name="close" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
       )}
 
       <KeyboardAvoidingView style={styles.content} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         {previewing ? (
-          <View style={styles.previewContainer}>
-            <Markdown>{session.body}</Markdown>
-          </View>
+          // Scrollable: a plain View silently cut off any note taller than the
+          // screen, with no way to reach the rest.
+          <ScrollView style={styles.content} contentContainerStyle={styles.previewContainer}>
+            <Markdown style={markdownStyles}>{session.body}</Markdown>
+          </ScrollView>
         ) : (
           <TextInput
-            autoFocus
+            autoFocus={autoFocus}
             multiline
             editable={!editingDisabled}
             value={session.body}
@@ -84,6 +90,8 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
           />
         )}
 
+        {/* Owns the status line too, so nothing renders below the prompt field
+            where the keyboard would cover it (PRD §7.4). */}
         <AgentFab
           canUndo={session.canUndo}
           canRedo={session.canRedo}
@@ -92,18 +100,43 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
           busy={turn.busy}
           onCancel={turn.cancel}
           onSubmit={turn.submit}
+          status={turn.status}
+          onClearStatus={turn.clearStatus}
           disabledReason={session.loadFailed ? "This note could not be opened." : turn.disabledReason}
         />
       </KeyboardAvoidingView>
-
-      {turn.status && (
-        <Text style={[styles.statusLine, styles[`status_${turn.status.kind}`]]} numberOfLines={2}>
-          {turn.status.text}
-        </Text>
-      )}
     </SafeAreaView>
   );
 }
+
+/**
+ * react-native-markdown-display ships near-black defaults, which are invisible
+ * on the dark palette's #121212 background. Every colour it can use has to come
+ * from the theme.
+ */
+const makeMarkdownStyles = (colors: Palette) => ({
+  body: { color: colors.text, fontSize: 16, lineHeight: 23 },
+  heading1: { color: colors.text, fontSize: 26, fontWeight: "700" as const, marginTop: 8, marginBottom: 6 },
+  heading2: { color: colors.text, fontSize: 21, fontWeight: "700" as const, marginTop: 8, marginBottom: 4 },
+  heading3: { color: colors.text, fontSize: 18, fontWeight: "600" as const, marginTop: 6, marginBottom: 4 },
+  hr: { backgroundColor: colors.border, height: StyleSheet.hairlineWidth },
+  link: { color: colors.accent },
+  blockquote: {
+    backgroundColor: colors.surface,
+    borderLeftColor: colors.accent,
+    borderLeftWidth: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginVertical: 6,
+  },
+  code_inline: { backgroundColor: colors.surface, color: colors.text, borderWidth: 0, fontSize: 14 },
+  code_block: { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border, borderRadius: 8 },
+  fence: { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border, borderRadius: 8 },
+  table: { borderColor: colors.border },
+  tr: { borderColor: colors.border },
+  bullet_list_icon: { color: colors.textSecondary },
+  ordered_list_icon: { color: colors.textSecondary },
+});
 
 const makeStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -122,7 +155,7 @@ const makeStyles = (colors: Palette) =>
     content: { flex: 1 },
     input: { flex: 1, fontSize: 16, padding: 16, color: colors.text },
     inputBusy: { backgroundColor: colors.surface, color: colors.textMuted },
-    previewContainer: { flex: 1, padding: 16 },
+    previewContainer: { padding: 16, paddingBottom: 160 },
     storageBanner: {
       flexDirection: "row",
       alignItems: "center",
@@ -133,10 +166,4 @@ const makeStyles = (colors: Palette) =>
     },
     storageBannerText: { flex: 1, color: colors.danger, fontSize: 13, fontWeight: "500" },
     storageBannerAction: { color: colors.danger, fontSize: 13, fontWeight: "700" },
-    statusLine: { fontSize: 13, paddingHorizontal: 16, paddingVertical: 6 },
-    status_working: { color: colors.textSecondary },
-    status_success: { color: colors.success },
-    status_none: { color: colors.textMuted },
-    status_error: { color: colors.danger },
-    status_cancelled: { color: colors.textMuted },
   });
