@@ -80,15 +80,53 @@ PRD.md                        full product requirements and architecture doc
 
 ```bash
 npm install
-npm test          # unit tests: agent core + notes logic (fast, no simulator)
-npm run ios       # or: npm run android / npm run web
+npm test          # agent core + notes logic — fast, no simulator, no network
 ```
 
-Other scripts: `npm run test:watch`.
+Other scripts: `npm run test:watch`, `npx tsc --noEmit`, `npx expo-doctor`.
 
-### Running on a device
+## Running the app in the iOS simulator
 
-A successful start prints `iOS Bundled <n>ms src/app/index.ts` with ~1050 modules. That line is worth waiting for rather than skimming past — it's the proof every native module resolved in the React Native runtime, which is where this project's runtime failures have actually come from (see PRD §12).
+**Prerequisite:** Xcode, with iOS platform support installed (Xcode → Settings → Components). You don't need an Apple developer account.
+
+```bash
+npm run ios
+```
+
+That starts the Metro dev server, boots a simulator, and opens the app inside Expo Go — installing Expo Go into the simulator on first run. There's no separate build step and nothing to open in Xcode.
+
+You're up when the terminal prints:
+
+```
+iOS Bundled 6693ms src/app/index.ts (1047 modules)
+```
+
+Worth waiting for rather than skimming past: that line is the proof every native module resolved in the React Native runtime, which is where this project's failures have actually come from — a clean `tsc` doesn't cover it (PRD §12).
+
+While it runs: `r` reloads the app, `i` reopens the simulator, `Ctrl-C` stops the server.
+
+### First run: enabling AI editing
+
+The notes app works immediately, but AI editing is off until you supply a key — the app has no backend and no bundled credentials:
+
+1. Tap the **gear** on the note list → Settings
+2. Paste an [OpenRouter](https://openrouter.ai/keys) API key (there's a paste button, and an eye toggle to check it)
+3. Pick a model — tap one of the suggestion chips, or type any tool-calling-capable slug from [openrouter.ai/models](https://openrouter.ai/models), e.g. `openai/gpt-4o-mini`. Most non-first-party models need a provider prefix, so check the exact slug there.
+4. **Save**, then **Validate** — validation makes one cheap real request to confirm the key/model pair actually works
+
+The key goes to the iOS keychain via `expo-secure-store`, never to a file in the repo. The `.env` described below is for `npm run test:live` only and is not read by the app.
+
+**If paste does nothing in the simulator**, the clipboard genuinely is empty — the simulator has its own pasteboard, separate from the Mac's, and it doesn't always sync. Copy the key on the Mac, then bridge it explicitly:
+
+```bash
+pbpaste | xcrun simctl pbcopy booted
+```
+
+Then open a note, tap the **✦ FAB**, and type an instruction like "turn this into a numbered list".
+
+`npm run android` works the same way. **`npm run web` bundles but notes don't work** — `expo-file-system`'s `File`/`Directory` classes throw on web. Web is a dev convenience, not a target platform (PRD §1).
+
+### Troubleshooting Metro
 
 **Keep this repo out of `~/Downloads`, `~/Desktop`, `~/Documents`, and iCloud Drive.** macOS gates FSEvents (what Watchman/Metro use for file-watching) behind a "Full Disk Access" permission for those specific folders; without it, Metro dies with `EMFILE: too many open files, watch` and no clear reason why. Clone/keep this somewhere ordinary, e.g. `~/Developer/anotai`.
 
