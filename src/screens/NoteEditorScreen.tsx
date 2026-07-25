@@ -6,6 +6,7 @@ import { Icon } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { useTheme } from "../theme/ThemeContext";
 import { AgentFab } from "./AgentFab";
+import { NoteHighlight } from "./NoteHighlight";
 import { useAgentTurn } from "./useAgentTurn";
 import { useNoteSession } from "./useNoteSession";
 
@@ -71,7 +72,13 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
       )}
 
       <KeyboardAvoidingView style={styles.content} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        {previewing ? (
+        {turn.highlight ? (
+          // Takes the editor's place while a change is tinted. The note is
+          // read-only for those few seconds — which costs nothing mid-turn,
+          // since the editor is already read-only then — and any tap hands
+          // editing straight back.
+          <NoteHighlight body={turn.highlight.body} range={turn.highlight.range} onDismiss={turn.dismissHighlight} />
+        ) : previewing ? (
           // Scrollable: a plain View silently cut off any note taller than the
           // screen, with no way to reach the rest.
           <ScrollView style={styles.content} contentContainerStyle={styles.previewContainer}>

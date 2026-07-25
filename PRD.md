@@ -388,10 +388,20 @@ Originally specified as sitting *under* the prompt bar; moved above it because t
 Clears on the next prompt, on manual typing, or after 30 s. Never accumulates history.
 
 ### 7.5 Change highlighting
-- After a turn, changed regions get a subtle background tint. Insertions are tinted; deletions are **not** shown as strikethrough — this is a notes app, not a review tool.
-- Word-level diff against the pre-turn snapshot (`fast-diff` or equivalent), computed once per turn regardless of which write tool ran.
-- Clears on manual typing, on the next prompt, on note close, or after 60 s.
+- Changed text gets a subtle background tint (`accentSurface`), and the view scrolls to it. Insertions are tinted; deletions are **not** shown as strikethrough — this is a notes app, not a review tool.
+- **Per tool call, not per turn.** `runTurn` takes an optional `onNoteWritten(before, after)` and calls it after each tool call that changed the note, so each step is shown as it lands. Each write replaces the previous highlight and restarts the timer — queueing them would hold the editor for 5 s × the number of writes.
+- **5 seconds, or any tap.** A tap dismisses immediately and hands editing straight back, so this never stands between the user and typing.
+- Also clears on the next prompt, and on a cancelled or timed-out turn — the note reverts there (§6.6), so a tint over text that no longer exists has to go with it.
 - Purely visual. Not persisted, and never written into the file.
+
+**A range of a controlled `TextInput` cannot be styled**, so while a highlight is up the editor is replaced by a read-only view (`NoteHighlight`) that renders the same text with the tint. Mid-turn this costs nothing — the editor is already read-only per §7.3 — and owning the `ScrollView` is what makes scrolling to the change possible at all; inside a `TextInput` it would mean guessing at line metrics.
+
+**Diffing is prefix/suffix trimming, not a diff library** (`changedRange`). Per tool call that is exact for a `rewrite_note` or a single `patch_note` edit, with no dependency added. Two caveats, both deliberate:
+
+- The raw range lands mid-word whenever the new text shares characters with what it replaced — `one three` → `one two three` yields `wo t`. Ranges are therefore widened to word boundaries, which can include one neighbouring unchanged word. That trade is why the original spec said "word-level".
+- A multi-edit `patch_note` collapses to one span covering all its edits plus the untouched text between them. Acceptable while edits within a patch are usually adjacent; `fast-diff` is the upgrade path if not.
+
+**Deletions** produce an empty range, so there is nothing to tint. The view scrolls to the point of removal and shows a small mark there — enough to say "something went from here" without resurrecting the text. Most real edits are replacements, which surface as insertions anyway, so this is the rare case; and the status line already says what happened in words.
 
 ### 7.6 Undo
 - Shared stack with manual editing, but an **entire agent turn collapses to one entry** — one undo fully reverts it, including multi-tool turns.

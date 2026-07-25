@@ -49,7 +49,20 @@ export type RunTurnParams = {
   history: CanonicalMessage[];
   provider: Provider;
   signal?: AbortSignal;
+  /**
+   * Called after each tool call that actually changed the note, with the body
+   * either side of that single write. Lets the UI highlight and scroll to each
+   * change as it lands rather than only once at the end of the turn (PRD §7.5).
+   *
+   * A plain callback, not an event emitter: the core stays framework-free, and
+   * the caller decides what a change means. Never called for a tool that left
+   * the note untouched.
+   */
+  onNoteWritten?: (before: string, after: string) => void;
 };
+
+/** The tools that can change the note, so the others are never read back around. */
+const WRITE_TOOLS = new Set(["rewrite_note", "patch_note"]);
 
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
@@ -150,8 +163,20 @@ export async function runTurn(params: RunTurnParams): Promise<TurnResult> {
 
     messages.push({ role: "assistant", toolCalls });
     for (const call of toolCalls) {
+      // Only read back around tools that can write, and only when someone is
+      // listening — read_note can't change anything, so comparing before and
+      // after it would be two wasted filesystem reads per call.
+      const watching = params.onNoteWritten !== undefined && WRITE_TOOLS.has(call.name);
+      const before = watching ? store.read() : null;
+
       const result = executeTool(call, store);
       toolCallsExecuted++;
+
+      if (before !== null) {
+        const after = store.read();
+        if (after !== before) params.onNoteWritten?.(before, after);
+      }
+
       messages.push({ role: "tool", toolCallId: call.id, content: JSON.stringify(result) });
     }
 

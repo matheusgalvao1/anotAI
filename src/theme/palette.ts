@@ -10,6 +10,12 @@ export type Palette = {
   danger: string;
   /** Tinted background behind a danger message, so a save failure reads as an alert rather than body text. */
   dangerSurface: string;
+  /**
+   * Tint behind text the agent just changed (PRD §7.5). A background, not a text
+   * colour: `accent` marks things you can tap, and recolouring note text with it
+   * would read as a link.
+   */
+  accentSurface: string;
   success: string;
 };
 
@@ -26,6 +32,7 @@ export const lightPalette: Palette = {
   accentText: "#FFFFFF",
   danger: "#DC2626",
   dangerSurface: "#FEF2F2",
+  accentSurface: "#FFE8CC",
   success: "#16A34A",
 };
 
@@ -40,5 +47,6 @@ export const darkPalette: Palette = {
   accentText: "#111827",
   danger: "#F87171",
   dangerSurface: "#3B1D1D",
+  accentSurface: "#4A2E12",
   success: "#4ADE80",
 };

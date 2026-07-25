@@ -32,6 +32,75 @@ describe("runTurn", () => {
     expect(result.toolCallsExecuted).toBe(1);
   });
 
+  describe("onNoteWritten", () => {
+    it("reports each write separately, with the body either side of it", async () => {
+      const store = new InMemoryNoteStore("one");
+      const provider = new ScriptedProvider([
+        [{ type: "toolCall", call: toolCall("rewrite_note", { content: "one two" }, "call_1") }],
+        [{ type: "toolCall", call: toolCall("rewrite_note", { content: "one two three" }, "call_2") }],
+        [{ type: "text", delta: "Done." }],
+      ]);
+      const writes: [string, string][] = [];
+
+      await runTurn({
+        prompt: "extend it twice",
+        noteTitle: "Untitled",
+        store,
+        history: [],
+        provider,
+        onNoteWritten: (before, after) => writes.push([before, after]),
+      });
+
+      // Per tool call, not once for the whole turn — otherwise the UI can only
+      // highlight the net result and never the intermediate steps.
+      expect(writes).toEqual([
+        ["one", "one two"],
+        ["one two", "one two three"],
+      ]);
+    });
+
+    it("is not called for a tool that only reads", async () => {
+      const store = new InMemoryNoteStore("untouched");
+      const provider = new ScriptedProvider([
+        [{ type: "toolCall", call: toolCall("read_note", {}, "call_1") }],
+        [{ type: "text", delta: "Had a look." }],
+      ]);
+      const onNoteWritten = jest.fn();
+
+      await runTurn({ prompt: "read it", noteTitle: "Untitled", store, history: [], provider, onNoteWritten });
+
+      expect(onNoteWritten).not.toHaveBeenCalled();
+    });
+
+    it("is not called when a write leaves the note identical", async () => {
+      const store = new InMemoryNoteStore("same text");
+      const provider = new ScriptedProvider([
+        [{ type: "toolCall", call: toolCall("rewrite_note", { content: "same text" }, "call_1") }],
+        [{ type: "text", delta: "Nothing to do." }],
+      ]);
+      const onNoteWritten = jest.fn();
+
+      await runTurn({ prompt: "rewrite it the same", noteTitle: "Untitled", store, history: [], provider, onNoteWritten });
+
+      // A highlight over text that didn't change would be a lie.
+      expect(onNoteWritten).not.toHaveBeenCalled();
+    });
+
+    it("is not called for a write whose arguments were rejected", async () => {
+      const store = new InMemoryNoteStore("original");
+      const provider = new ScriptedProvider([
+        [{ type: "toolCall", call: toolCall("rewrite_note", { content: 42 }, "call_1") }],
+        [{ type: "text", delta: "Could not do that." }],
+      ]);
+      const onNoteWritten = jest.fn();
+
+      await runTurn({ prompt: "break it", noteTitle: "Untitled", store, history: [], provider, onNoteWritten });
+
+      expect(store.read()).toBe("original");
+      expect(onNoteWritten).not.toHaveBeenCalled();
+    });
+  });
+
   it("chains read_note then rewrite_note across iterations", async () => {
     const store = new InMemoryNoteStore("line one\nline two");
     const provider = new ScriptedProvider([

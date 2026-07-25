@@ -10,13 +10,23 @@ import {
   TURN_TIMEOUT,
 } from "../agent";
 import { FileNoteStore } from "../notes/agentNoteStore";
+import { ChangedRange, changedRange } from "../notes/changedRange";
 import { deriveTitleAndPreview } from "../notes/title";
 import { getApiKey, getDefaultModel } from "../settings/secureSettings";
 
 const STATUS_CLEAR_MS = 30_000;
+/** How long a change stays tinted before the editor comes back (PRD §7.5). */
+const HIGHLIGHT_MS = 5_000;
 
 export type TurnStatusKind = "working" | "success" | "none" | "error" | "cancelled";
 export type TurnStatus = { kind: TurnStatusKind; text: string } | null;
+
+/**
+ * The note as one tool call left it, plus what that call changed. Carries its own
+ * body rather than reading the session's: mid-turn writes haven't been adopted
+ * into the editor yet, so the session's body is still the pre-turn text.
+ */
+export type ChangeHighlight = { body: string; range: ChangedRange } | null;
 
 export type AgentTurn = {
   busy: boolean;
@@ -32,6 +42,10 @@ export type AgentTurn = {
    * a bug (PRD §7.4).
    */
   clearStatus: () => void;
+  /** The latest agent change to show tinted, or null when the editor should be live. */
+  highlight: ChangeHighlight;
+  /** Ends the highlight early and hands editing straight back. */
+  dismissHighlight: () => void;
 };
 
 type Params = {
@@ -100,11 +114,13 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<TurnStatus>(null);
   const [disabledReason, setDisabledReason] = useState<string | null>("Checking for an OpenRouter key…");
+  const [highlight, setHighlight] = useState<ChangeHighlight>(null);
 
   const historyRef = useRef<CanonicalMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const credentialsRef = useRef<{ apiKey: string; model: string } | null>(null);
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +142,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
   useEffect(
     () => () => {
       if (statusTimer.current) clearTimeout(statusTimer.current);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
       abortRef.current?.abort();
     },
     [],
@@ -138,6 +155,20 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
   }, []);
 
   const clearStatus = useCallback(() => setTransientStatus(null), [setTransientStatus]);
+
+  const dismissHighlight = useCallback(() => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = null;
+    setHighlight(null);
+  }, []);
+
+  const showHighlight = useCallback((body: string, range: ChangedRange) => {
+    // Each write replaces the last rather than queueing behind it: a turn with
+    // three patches would otherwise hold the editor for fifteen seconds.
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    setHighlight({ body, range });
+    highlightTimer.current = setTimeout(() => setHighlight(null), HIGHLIGHT_MS);
+  }, []);
 
   const submit = useCallback(
     async (prompt: string) => {
@@ -161,6 +192,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
       const timeout = setTimeout(() => controller.abort(TURN_TIMEOUT), AGENT_CONFIG.REQUEST_TIMEOUT_MS);
 
       setBusy(true);
+      dismissHighlight(); // a new prompt supersedes whatever the last one highlighted
       setTransientStatus({ kind: "working", text: "Thinking…" });
 
       try {
@@ -172,6 +204,10 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
           history: historyRef.current,
           provider: buildProvider(apiKey, model),
           signal: controller.signal,
+          onNoteWritten: (before, after) => {
+            const range = changedRange(before, after);
+            if (range) showHighlight(after, range);
+          },
         });
 
         historyRef.current = result.updatedHistory;
@@ -181,6 +217,9 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
         // half of an edit nobody asked for, so it goes back rather than being
         // adopted. Only a turn that ran to completion changes the note.
         if (aborted) {
+          // The note is going back to how it was, so a highlight over text that
+          // no longer exists has to go with it.
+          dismissHighlight();
           if (result.bodyChanged) onRevert(preTurnBody);
         } else if (result.bodyChanged) {
           onBodyChanged(result.newBody);
@@ -205,6 +244,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
           // The last line of defence. Whatever a transport throws when it's
           // cancelled, the aborted signal is the fact that matters — never show
           // the user a raw exception for something they did on purpose.
+          dismissHighlight();
           onRevert(preTurnBody);
           const timedOut = controller.signal.reason === TURN_TIMEOUT;
           setTransientStatus(
@@ -219,10 +259,10 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
         setBusy(false);
       }
     },
-    [busy, flush, bodyRef, noteId, onBodyChanged, onRevert, onStorageError, setTransientStatus],
+    [busy, dismissHighlight, flush, bodyRef, noteId, onBodyChanged, onRevert, onStorageError, setTransientStatus, showHighlight],
   );
 
   const cancel = useCallback(() => abortRef.current?.abort(), []);
 
-  return { busy, status, disabledReason, submit, cancel, clearStatus };
+  return { busy, status, disabledReason, submit, cancel, clearStatus, highlight, dismissHighlight };
 }
