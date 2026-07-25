@@ -30,6 +30,13 @@ export type ProviderErrorKind =
   | "insufficient_credits"
   | "not_found"
   | "no_tool_support"
+  /**
+   * The request was aborted. A provider only ever sees "the signal fired" and
+   * cannot tell a user cancellation from a deadline, so it always reports
+   * `cancelled`; distinguishing the two is the caller's job, via the abort
+   * reason it passed in (see `TURN_TIMEOUT` in loop.ts).
+   */
+  | "cancelled"
   | "timeout"
   | "network"
   | "unknown";

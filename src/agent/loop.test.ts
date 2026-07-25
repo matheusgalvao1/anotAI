@@ -1,8 +1,8 @@
 import { AGENT_CONFIG } from "./config";
-import { runTurn } from "./loop";
-import { InMemoryNoteStore } from "./noteStore";
+import { runTurn, TURN_TIMEOUT } from "./loop";
+import { InMemoryNoteStore, NoteStore, NoteStoreError } from "./noteStore";
 import { ScriptedProvider } from "./providers/mock";
-import { ToolCall } from "./types";
+import { Provider, ToolCall } from "./types";
 
 function toolCall(name: string, args: Record<string, unknown>, id = "call_1"): ToolCall {
   return { id, name, arguments: args };
@@ -127,5 +127,149 @@ describe("runTurn", () => {
     await expect(
       runTurn({ prompt: "edit", noteTitle: "Untitled", store, history: [], provider }),
     ).rejects.toThrow("bad key");
+  });
+});
+
+describe("runTurn abort reporting", () => {
+  const store = () => new InMemoryNoteStore("body");
+
+  it("reports a deadline abort as timed_out, not as a user cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort(TURN_TIMEOUT);
+    const provider = new ScriptedProvider([[{ type: "text", delta: "too late" }]]);
+
+    const result = await runTurn({
+      prompt: "slow request",
+      noteTitle: "Untitled",
+      store: store(),
+      history: [],
+      provider,
+      signal: controller.signal,
+    });
+
+    expect(result.stoppedReason).toBe("timed_out");
+    expect(result.finalText).toBe("Timed out");
+  });
+
+  /**
+   * An abort landing while the request is still opening arrives as an error
+   * *event* rather than a thrown AbortError. Both are the same situation, so
+   * both must report identically — previously this path raised a provider error
+   * reading "The request timed out." at the user who had just pressed cancel.
+   */
+  it("reports an abort delivered as an error event the same as a thrown abort", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const provider: Provider = {
+      id: "aborting",
+      async *send() {
+        yield { type: "error", error: { kind: "cancelled", message: "The request was cancelled." } };
+      },
+    };
+
+    const result = await runTurn({
+      prompt: "cancel me",
+      noteTitle: "Untitled",
+      store: store(),
+      history: [],
+      provider,
+      signal: controller.signal,
+    });
+
+    expect(result.stoppedReason).toBe("cancelled");
+    expect(result.finalText).toBe("Cancelled");
+  });
+
+  it("still distinguishes a timeout when it arrives as an error event", async () => {
+    const controller = new AbortController();
+    controller.abort(TURN_TIMEOUT);
+    const provider: Provider = {
+      id: "aborting",
+      async *send() {
+        yield { type: "error", error: { kind: "cancelled", message: "The request was cancelled." } };
+      },
+    };
+
+    const result = await runTurn({
+      prompt: "slow",
+      noteTitle: "Untitled",
+      store: store(),
+      history: [],
+      provider,
+      signal: controller.signal,
+    });
+
+    expect(result.stoppedReason).toBe("timed_out");
+  });
+});
+
+/**
+ * Malformed tool arguments are the model's mistake, and the loop's job is to
+ * hand the mistake back so it can correct itself. Storage failures are not the
+ * model's mistake and must not be papered over as a tool result.
+ */
+describe("runTurn tool failure handling", () => {
+  it("returns a tool error to the model instead of crashing on malformed arguments", async () => {
+    const store = new InMemoryNoteStore("the user's real content");
+    const provider = new ScriptedProvider([
+      [{ type: "toolCall", call: toolCall("rewrite_note", {}) }],
+      [{ type: "toolCall", call: toolCall("rewrite_note", { content: "corrected body" }, "call_2") }],
+      [{ type: "text", delta: "Fixed it." }],
+    ]);
+
+    const result = await runTurn({ prompt: "edit", noteTitle: "Untitled", store, history: [], provider });
+
+    expect(result.finalText).toBe("Fixed it.");
+    expect(store.read()).toBe("corrected body");
+
+    // The failed call has to reach the model as a tool result, or it has nothing to react to.
+    const secondRequest = provider.requests[1];
+    const toolResult = secondRequest.messages.find((m) => m.role === "tool");
+    expect(toolResult).toBeDefined();
+    expect((toolResult as { content: string }).content).toContain("content");
+  });
+
+  it("leaves the note untouched when every tool call is malformed", async () => {
+    const store = new InMemoryNoteStore("untouched");
+    const provider = new ScriptedProvider([
+      [{ type: "toolCall", call: toolCall("patch_note", { edits: "not an array" }) }],
+      [{ type: "text", delta: "I could not apply that." }],
+    ]);
+
+    const result = await runTurn({ prompt: "edit", noteTitle: "Untitled", store, history: [], provider });
+
+    expect(store.read()).toBe("untouched");
+    expect(result.bodyChanged).toBe(false);
+    expect(result.stoppedReason).toBe("completed");
+  });
+
+  it("returns a tool error for an unknown tool name", async () => {
+    const store = new InMemoryNoteStore("body");
+    const provider = new ScriptedProvider([
+      [{ type: "toolCall", call: toolCall("delete_everything", {}) }],
+      [{ type: "text", delta: "That tool does not exist." }],
+    ]);
+
+    const result = await runTurn({ prompt: "edit", noteTitle: "Untitled", store, history: [], provider });
+
+    expect(result.stoppedReason).toBe("completed");
+    expect(store.read()).toBe("body");
+  });
+
+  it("propagates a NoteStoreError rather than reporting it to the model as a tool error", async () => {
+    const store: NoteStore = {
+      read: () => "body",
+      write: () => {
+        throw new NoteStoreError("Could not save the note: disk full");
+      },
+    };
+    const provider = new ScriptedProvider([
+      [{ type: "toolCall", call: toolCall("rewrite_note", { content: "new body" }) }],
+      [{ type: "text", delta: "unreachable" }],
+    ]);
+
+    await expect(
+      runTurn({ prompt: "edit", noteTitle: "Untitled", store, history: [], provider }),
+    ).rejects.toThrow(NoteStoreError);
   });
 });

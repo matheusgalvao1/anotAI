@@ -2,8 +2,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "commonjs",
-    "moduleResolution": "node",
-    "customConditions": [],
+    // "bundler" rather than "node10": node10 is deprecated and stops working in
+    // TypeScript 7, and it's also the only setting that makes `customConditions`
+    // illegal — which used to make `npx tsc -p tsconfig.jest.json` fail on the
+    // config itself before it checked a single file.
+    "moduleResolution": "bundler",
     "types": ["jest", "node"]
   },
   "exclude": ["node_modules", "android", "ios"]

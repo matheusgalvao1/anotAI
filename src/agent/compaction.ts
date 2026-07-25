@@ -44,10 +44,49 @@ async function summarize(messages: CanonicalMessage[], provider: Provider): Prom
   }
 }
 
-function dropOldest(messages: CanonicalMessage[]): CanonicalMessage[] {
-  const kept = [...messages];
-  while (kept.length > 1 && estimateTokens(JSON.stringify(kept)) > AGENT_CONFIG.COMPACT_THRESHOLD_TOKENS) {
-    kept.shift();
+/**
+ * Groups messages so a tool-call round trip stays indivisible: an assistant
+ * message carrying `toolCalls` travels with the `tool` results that answer it.
+ * Dropping one without the other produces a message list that OpenAI-shaped
+ * APIs reject outright ("a tool message must follow an assistant message with
+ * tool_calls"), which would turn this fallback into a hard failure.
+ */
+function groupMessages(messages: CanonicalMessage[]): CanonicalMessage[][] {
+  const groups: CanonicalMessage[][] = [];
+
+  for (const message of messages) {
+    const isToolResult = message.role === "tool";
+    const previousGroup = groups[groups.length - 1];
+    const previousOpensToolCalls =
+      previousGroup !== undefined &&
+      previousGroup[0].role === "assistant" &&
+      "toolCalls" in previousGroup[0];
+
+    if (isToolResult && previousOpensToolCalls) {
+      previousGroup.push(message);
+    } else {
+      groups.push([message]);
+    }
   }
-  return kept;
+
+  return groups;
+}
+
+/**
+ * Last-resort shrink when summarization itself fails. Drops whole groups from
+ * the front so the surviving list is always a valid request, and never strands
+ * a `tool` result at the head of the conversation.
+ */
+function dropOldest(messages: CanonicalMessage[]): CanonicalMessage[] {
+  const groups = groupMessages(messages);
+
+  while (groups.length > 1 && estimateTokens(JSON.stringify(groups.flat())) > AGENT_CONFIG.COMPACT_THRESHOLD_TOKENS) {
+    groups.shift();
+  }
+
+  // Defensive: group-wise dropping can't strand a tool result, but an input
+  // list that already began with one would still be invalid to send.
+  const kept = groups.flat();
+  const firstSendable = kept.findIndex((m) => m.role !== "tool");
+  return firstSendable === -1 ? [] : kept.slice(firstSendable);
 }

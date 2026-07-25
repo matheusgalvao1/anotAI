@@ -1,6 +1,29 @@
-import { CanonicalMessage, Provider, ProviderError, ProviderRequest, ProviderStreamEvent, ToolCall, ToolSchema } from "../types";
+import { CanonicalMessage, Provider, ProviderError, ProviderRequest, ProviderStreamEvent, ToolSchema } from "../types";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/**
+ * The subset of `fetch` this adapter needs, kept structural on purpose: it has
+ * to accept the platform `fetch`, `expo/fetch` (whose `Response` is its own
+ * class, not the DOM one), and a plain stub in tests — without the agent core
+ * importing anything platform-specific to describe them.
+ */
+export type FetchLikeInit = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+};
+
+export type FetchLikeResponse = {
+  ok: boolean;
+  status: number;
+  /** Null whenever the implementation can't stream, which this adapter reports rather than hiding. */
+  body: ReadableStream<Uint8Array> | null;
+  json: () => Promise<unknown>;
+};
+
+export type FetchLike = (url: string, init?: FetchLikeInit) => Promise<FetchLikeResponse>;
 
 export type OpenRouterProviderOptions = {
   apiKey: string;
@@ -8,6 +31,17 @@ export type OpenRouterProviderOptions = {
   /** Sent as HTTP-Referer / X-Title per OpenRouter's attribution convention. No user identifiers. */
   referer?: string;
   title?: string;
+  /**
+   * Streaming-capable fetch. **The app must pass `expo/fetch` explicitly**
+   * (PRD §10 tech stack) — do not rely on the ambient global. React Native's
+   * own `fetch` is `whatwg-fetch` over XHR and its `Response` has no `body`
+   * property at all, so SSE cannot be read from it. Expo SDK 57 happens to
+   * replace `globalThis.fetch` with its streaming implementation, but that is
+   * an implicit side effect gated on `EXPO_PUBLIC_USE_RN_FETCH`, and this
+   * module is framework-free and may run outside the Expo runtime. Defaults to
+   * `globalThis.fetch` only as a convenience for Node-side tests.
+   */
+  fetch?: FetchLike;
 };
 
 /**
@@ -15,10 +49,6 @@ export type OpenRouterProviderOptions = {
  * shaped chat completions API. This is the only provider implementation in
  * v1; adding OpenAI/Anthropic/Google (PRD §14.1) means adding sibling files
  * that implement the same Provider interface, not touching the loop.
- *
- * NOTE: streaming behavior needs validation against physical iOS/Android
- * hardware early (PRD §11, §12) — RN's fetch streaming support has
- * historically been fragile.
  */
 export class OpenRouterProvider implements Provider {
   readonly id = "openrouter";
@@ -34,9 +64,18 @@ export class OpenRouterProvider implements Provider {
       ...(req.tools.length > 0 ? { tools: req.tools.map(toOpenAiTool) } : {}),
     };
 
-    let response: Response;
+    const doFetch = this.opts.fetch ?? (typeof globalThis.fetch === "function" ? globalThis.fetch : undefined);
+    if (!doFetch) {
+      yield {
+        type: "error",
+        error: { kind: "network", message: "No fetch implementation available. Pass one via OpenRouterProviderOptions." },
+      };
+      return;
+    }
+
+    let response: FetchLikeResponse;
     try {
-      response = await fetch(OPENROUTER_URL, {
+      response = await doFetch(OPENROUTER_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -52,8 +91,23 @@ export class OpenRouterProvider implements Provider {
       return;
     }
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       yield { type: "error", error: await toHttpError(response) };
+      return;
+    }
+
+    // A successful response with no readable body means the fetch in use can't
+    // stream — reporting that as an HTTP error would have blamed OpenRouter for
+    // a local wiring problem ("request failed (HTTP 200)").
+    if (!response.body) {
+      yield {
+        type: "error",
+        error: {
+          kind: "network",
+          message:
+            "The fetch implementation in use does not expose a streaming response body, so the model's reply cannot be read. Pass expo/fetch to OpenRouterProvider.",
+        },
+      };
       return;
     }
 
@@ -89,7 +143,7 @@ function toOpenAiTool(t: ToolSchema): unknown {
   return { type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } };
 }
 
-async function toHttpError(response: Response): Promise<ProviderError> {
+async function toHttpError(response: FetchLikeResponse): Promise<ProviderError> {
   let message = `OpenRouter request failed (HTTP ${response.status}).`;
   try {
     const json = (await response.json()) as { error?: { message?: string } };
@@ -113,13 +167,25 @@ async function toHttpError(response: Response): Promise<ProviderError> {
 }
 
 function toNetworkError(err: unknown): ProviderError {
+  // An adapter can't know *why* the signal fired — a user tapping cancel and a
+  // deadline elapsing look identical here. Report the neutral fact and let the
+  // caller, which owns the abort reason, decide how to describe it.
   if (err instanceof Error && err.name === "AbortError") {
-    return { kind: "timeout", message: "The request was aborted." };
+    return { kind: "cancelled", message: "The request was cancelled." };
   }
   return { kind: "network", message: err instanceof Error ? err.message : "Network request failed." };
 }
 
 type ToolCallBuffer = { id: string; name: string; args: string };
+
+/** Matches an SSE event separator: a blank line, in either LF or CRLF form. */
+const EVENT_SEPARATOR = /\r?\n\r?\n/;
+
+function splitFirstEvent(buffer: string): { event: string; rest: string } | null {
+  const match = EVENT_SEPARATOR.exec(buffer);
+  if (!match) return null;
+  return { event: buffer.slice(0, match.index), rest: buffer.slice(match.index + match[0].length) };
+}
 
 async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncIterable<ProviderStreamEvent> {
   const reader = stream.getReader();
@@ -133,16 +199,41 @@ async function* parseSse(stream: ReadableStream<Uint8Array>): AsyncIterable<Prov
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      let sepIndex: number;
-      while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
-        const rawEvent = buffer.slice(0, sepIndex);
-        buffer = buffer.slice(sepIndex + 2);
-        yield* parseSseEvent(rawEvent, toolCallBuffers);
+      let split = splitFirstEvent(buffer);
+      while (split) {
+        buffer = split.rest;
+        yield* parseSseEvent(split.event, toolCallBuffers);
+        split = splitFirstEvent(buffer);
       }
     }
+
+    // A stream that ends without a trailing blank line still has one real event
+    // left in the buffer. Dropping it loses the model's last text delta — or a
+    // whole tool call.
+    buffer += decoder.decode();
+    if (buffer.trim().length > 0) {
+      yield* parseSseEvent(buffer, toolCallBuffers);
+    }
+
+    // Not every provider behind OpenRouter closes a tool call with
+    // `finish_reason: "tool_calls"` — some send "stop", some send no
+    // finish_reason at all before ending the stream. Anything still buffered
+    // here is a complete tool call that just never got its terminator, and
+    // silently discarding it makes the agent look like it ignored the user.
+    yield* flushToolCalls(toolCallBuffers);
   } finally {
     reader.releaseLock();
   }
+}
+
+function* flushToolCalls(buffers: Map<number, ToolCallBuffer>): Generator<ProviderStreamEvent> {
+  for (const buf of buffers.values()) {
+    // A call with no name was never usable — the loop would reject it as an
+    // unknown tool, which is noise rather than signal.
+    if (!buf.name) continue;
+    yield { type: "toolCall", call: { id: buf.id, name: buf.name, arguments: safeParseJson(buf.args) } };
+  }
+  buffers.clear();
 }
 
 function* parseSseEvent(raw: string, buffers: Map<number, ToolCallBuffer>): Generator<ProviderStreamEvent> {
@@ -187,12 +278,11 @@ function* parseSseEvent(raw: string, buffers: Map<number, ToolCallBuffer>): Gene
       }
     }
 
-    if (choice.finish_reason === "tool_calls") {
-      for (const buf of buffers.values()) {
-        const call: ToolCall = { id: buf.id, name: buf.name, arguments: safeParseJson(buf.args) };
-        yield { type: "toolCall", call };
-      }
-      buffers.clear();
+    // Any terminal finish_reason closes out whatever tool calls have been
+    // accumulated. Gating on "tool_calls" alone drops the call entirely on the
+    // providers that report "stop" instead.
+    if (typeof choice.finish_reason === "string" && choice.finish_reason.length > 0) {
+      yield* flushToolCalls(buffers);
     }
   }
 }

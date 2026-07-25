@@ -1,6 +1,6 @@
 import { compact } from "./compaction";
 import { AGENT_CONFIG } from "./config";
-import { NoteStore } from "./noteStore";
+import { NoteStore, NoteStoreError } from "./noteStore";
 import { buildSystemPrompt } from "./systemPrompt";
 import { estimateTokens } from "./tokens";
 import {
@@ -8,10 +8,7 @@ import {
   executeReadNote,
   executeRewriteNote,
   PATCH_NOTE_SCHEMA,
-  PatchNoteArgs,
   READ_NOTE_SCHEMA,
-  ReadNoteArgs,
-  RewriteNoteArgs,
   REWRITE_NOTE_SCHEMA,
 } from "./tools";
 import { CanonicalMessage, Provider, ProviderError, ToolCall, ToolSchema } from "./types";
@@ -25,7 +22,15 @@ export class AgentProviderError extends Error {
   }
 }
 
-export type StoppedReason = "completed" | "max_iterations" | "cancelled";
+export type StoppedReason = "completed" | "max_iterations" | "cancelled" | "timed_out";
+
+/**
+ * Pass this as the abort reason (`controller.abort(TURN_TIMEOUT)`) when a turn
+ * is being cut off by a deadline rather than by the user. Both arrive as an
+ * `AbortError`, and reporting a 2-minute timeout as "Cancelled" tells the user
+ * they did something they didn't.
+ */
+export const TURN_TIMEOUT = "anotai:turn-timeout";
 
 export type TurnResult = {
   finalText: string;
@@ -58,16 +63,30 @@ function selectTools(noteTokenCount: number): ToolSchema[] {
   return tools;
 }
 
+/**
+ * Dispatches one tool call. Arguments are untrusted model output, so each
+ * executor validates its own input and returns a tool error rather than
+ * throwing — a bad argument becomes something the model can correct on the next
+ * iteration instead of aborting the user's turn.
+ *
+ * Storage failures and cancellation are the two exceptions: both rethrow, since
+ * neither is something the model can fix by trying again.
+ */
 function executeTool(call: ToolCall, store: NoteStore): unknown {
-  switch (call.name) {
-    case "read_note":
-      return executeReadNote(store, call.arguments as unknown as ReadNoteArgs);
-    case "rewrite_note":
-      return executeRewriteNote(store, call.arguments as unknown as RewriteNoteArgs);
-    case "patch_note":
-      return executePatchNote(store, call.arguments as unknown as PatchNoteArgs);
-    default:
-      return { ok: false, error: `Unknown tool: ${call.name}` };
+  try {
+    switch (call.name) {
+      case "read_note":
+        return executeReadNote(store, call.arguments);
+      case "rewrite_note":
+        return executeRewriteNote(store, call.arguments);
+      case "patch_note":
+        return executePatchNote(store, call.arguments);
+      default:
+        return { ok: false, error: `Unknown tool: ${call.name}` };
+    }
+  } catch (err) {
+    if (err instanceof NoteStoreError || isAbortError(err)) throw err;
+    return { ok: false, error: err instanceof Error ? err.message : "The tool failed unexpectedly." };
   }
 }
 
@@ -109,15 +128,18 @@ export async function runTurn(params: RunTurnParams): Promise<TurnResult> {
         else if (event.type === "error") sawError = event.error;
       }
     } catch (err) {
-      if (isAbortError(err)) {
-        stoppedReason = "cancelled";
-        finalText = "Cancelled";
-        return buildResult();
-      }
+      if (isAbortError(err)) return abortResult();
       throw err;
     }
 
-    if (sawError) throw new AgentProviderError(sawError);
+    // An abort surfaces either as a thrown AbortError (mid-stream) or as an
+    // error event (if it lands while the request is still being opened). Both
+    // are the same user-visible situation, so they must report identically —
+    // checking the signal here is what keeps them from diverging.
+    if (sawError) {
+      if (signal.aborted) return abortResult();
+      throw new AgentProviderError(sawError);
+    }
 
     if (toolCalls.length === 0) {
       messages.push({ role: "assistant", content: assistantText });
@@ -140,6 +162,14 @@ export async function runTurn(params: RunTurnParams): Promise<TurnResult> {
   }
 
   return buildResult();
+
+  /** Shared exit for both abort paths, so a timeout is never reported as a cancellation. */
+  function abortResult(): TurnResult {
+    const timedOut = signal.reason === TURN_TIMEOUT;
+    stoppedReason = timedOut ? "timed_out" : "cancelled";
+    finalText = timedOut ? "Timed out" : "Cancelled";
+    return buildResult();
+  }
 
   function buildResult(): TurnResult {
     const newBody = store.read();
