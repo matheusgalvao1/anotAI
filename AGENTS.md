@@ -23,19 +23,32 @@ Read the exact versioned docs for the Expo SDK actually pinned in `package.json`
 
 ## Architecture invariant: the agent core stays framework-free
 
-`src/agent/` must never import React, React Native, or Expo APIs. It's plain TypeScript, tested headless in Jest with no simulator and no network (see `src/agent/providers/mock.ts`). This is deliberate — it's what makes the hardest part of the app (the loop, tool-calling, compaction) fast to iterate on and cheap to test. If a change to `src/agent/` seems to need a React or RN import, that's a sign the abstraction boundary is being violated — push the platform-specific bit (file I/O, secure storage, fetch) behind an interface instead (see `NoteStore`, `Provider`).
+`src/agent/` must never import React, React Native, or Expo APIs. It's plain TypeScript, tested headless in Jest with no simulator and no network (see `src/agent/providers/mock.ts`). This is deliberate — it's what makes the hardest part of the app (the loop, tool-calling, compaction) fast to iterate on and cheap to test. If a change to `src/agent/` seems to need a React or RN import, that's a sign the abstraction boundary is being violated — push the platform-specific bit (file I/O, secure storage, fetch) behind an interface instead (see `NoteStore`, `Provider`, `FetchLike`).
+
+Verify with: `grep -rn "from \"react\|from \"expo\|react-native" src/agent/` — that must return nothing.
+
+**The invariant covers implicit dependencies too, not just import statements.** `OpenRouterProvider` used to call the ambient global `fetch`, which looked framework-free and wasn't: RN's own `fetch` is `whatwg-fetch` over XHR and its `Response` has no `body` property at all, so SSE can't be read from it. The app only worked because Expo SDK 57 replaces `globalThis.fetch` with its streaming implementation (`node_modules/expo/src/winter/runtime.native.ts`, gated on `EXPO_PUBLIC_USE_RN_FETCH`) — an invisible side effect the core had no way to declare or test. `fetch` is now injected via `OpenRouterProviderOptions.fetch`, and `src/screens/useAgentTurn.ts` passes `expo/fetch` explicitly. If you add a provider, inject its transport the same way.
+
+## Two error classes, deliberately kept apart
+
+- **Recoverable, model-facing:** malformed tool arguments. Validated at the tool boundary in `src/agent/tools.ts` and returned as `{ok: false, error}` so the model can correct itself on the next iteration. These must never throw — a thrown validation error kills the whole turn and surfaces a raw JS message to the user.
+- **Not recoverable, user-facing:** storage failures. `src/notes/noteRepository.ts` wraps every filesystem call and throws `NoteStoreError`; `runTurn` rethrows it rather than reporting it to the model, and the editor shows a persistent banner. PRD §14's error matrix calls silent data loss the worst outcome in the app, so nothing on this path may be swallowed or auto-dismissed.
 
 ## Commands
 
 ```bash
-npm test          # agent core Jest suite — run this after any src/agent/ change
+npm test                              # agent core + notes Jest suite — run after any src/ change
 npm run test:watch
-npx tsc --noEmit  # type-check the app (uses tsconfig.json, excludes *.test.ts)
-npm start         # Expo dev server
+npx tsc --noEmit                      # type-check the app (tsconfig.json, excludes *.test.ts)
+npx tsc --noEmit -p tsconfig.jest.json  # type-check the tests
+npx expo-doctor                       # dependency/config sanity — run after any dependency change
+npm start                             # Expo dev server
 npm run ios / android / web
 ```
 
-`src/agent/**/*.test.ts` is type-checked separately via `tsconfig.jest.json` (it needs Jest's ambient types, which the app's own `tsconfig.json` deliberately excludes). If you add a new tsconfig-affecting setting, check both configs still resolve cleanly.
+Test files are type-checked separately via `tsconfig.jest.json` (they need Jest's ambient types, which the app's own `tsconfig.json` deliberately excludes). **Both `tsc` invocations must exit 0.** `tsconfig.jest.json` once combined `moduleResolution: "node"` with `customConditions: []`, a contradiction that made `tsc -p tsconfig.jest.json` fail on the config itself — `npm test` still type-checked fine through ts-jest, so the broken command went unnoticed. It uses `moduleResolution: "bundler"` now; `"node"`/node10 is also deprecated and stops working in TypeScript 7.
+
+Jest 30 is paired with ts-jest 29 **on purpose** — ts-jest 29.4 declares `jest: "^29.0.0 || ^30.0.0"`, so this is supported, not a mismatch. Expo SDK 57 separately pins jest ~29 for `jest-expo`, which this project doesn't use; that's recorded in `package.json`'s `expo.install.exclude` so `expo-doctor` stays green. Don't "fix" it by downgrading.
 
 ## Environment gotchas (all found the hard way getting M1 running on an iOS simulator)
 
@@ -44,6 +57,13 @@ npm run ios / android / web
 - **`punycode` is a real npm dependency here, not dead weight.** `react-native-markdown-display` → `markdown-it` does `require('punycode')` expecting Node's core module, which doesn't exist in the RN runtime. Installing the userland `punycode` package lets Metro resolve it instead of failing the whole iOS bundle. Don't remove it as "unused."
 - **`expo-file-system`'s `Directory`/`File` classes do not work on web** (`this.validatePath is not a function` at runtime) despite the bundle compiling cleanly — web is a dev convenience, not a target platform (PRD §1), so this is a known, accepted gap, not a bug to chase.
 - If `expo start --ios` prints `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` — that's Metro's own recovery routine (it just ran `watchman watch-del-all` for you) telling you, literally, to run the same command again. It usually works the second time.
+- **Watchman is effectively mandatory here; the fallback watcher cannot substitute for it.** When watchman is unavailable Metro falls back to Node's `fs.watch` and dies with `Error: EMFILE: too many open files, watch` at `FSWatcher._handle.onchange`. If you see EMFILE, repair watchman — don't chase the fd limit. These three workarounds were each tried and each still EMFILEs, so don't spend time on them again:
+  - raising the fd limit (`ulimit -n 65536`)
+  - `resolver.useWatchman = false` in a `metro.config.js` (Metro's own watcher is the one running out, so opting out of watchman explicitly changes nothing)
+  - `EXPO_NO_TYPESCRIPT_SETUP=1` (the EMFILE lands later, after `xcrun simctl list devices`, so Expo's TypeScript-setup watcher isn't the culprit despite appearing just above it in the debug log)
+- **Don't kill the `watchman` daemon to "clean up".** A long-running daemon keeps working across a `brew upgrade` that replaces its binary; shutting it down is what makes the replacement take effect, and the new binary can come up unable to create FSEvents streams at all. Diagnostic that pins it down: `watchman watch-project <dir>` failing with `FSEventStreamStart failed` for **every** path — including an unprotected one like `/private/tmp` — means the daemon itself is broken, not that a directory is TCC-protected (contrast the `~/Downloads` case above, which is genuinely path-specific). Check `ls -l /opt/homebrew/bin/watchman` against when it last worked. Recovery is `brew reinstall watchman` and/or granting the new binary Full Disk Access in System Settings → Privacy & Security; it is a GUI action, so an agent session cannot do it.
+- **`userInterfaceStyle` in `app.json` must stay `"automatic"`.** The app ships a Light/Dark/**System** picker built on `useColorScheme()`; setting this to `"light"` (Expo's documented default) forces light appearance app-wide and makes the System option permanently resolve to light. This is invisible in Expo Go, which supplies its own `Info.plist` — it only shows up in a dev or production build. `expo-system-ui` is a required dependency for appearance styles to work on Android builds.
+- **`expo-font` is a required peer dependency of `@expo/vector-icons`**, not optional. Without it the app can crash outside Expo Go. `npx expo-doctor` catches this class of thing; run it after any dependency change.
 
 `npm test` never calls a real model. `*.live.test.ts` files (run via `npm run test:live`, config in `jest.live.config.js`) hit the real OpenRouter API and are excluded from `npm test` on purpose — never fold them into the default suite or CI. They read credentials from `.env` (copy `.env.example`) via `dotenv/config`, loaded only in `jest.live.config.js` — never wire `.env` loading into the main suite or the app itself; the shipped app reads keys from the OS keychain, never env vars (PRD §8). The env var convention is `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`, matching a `Provider.id`, so it extends as more providers land (PRD §14.1).
 

@@ -43,10 +43,11 @@ src/agent/              agent core — plain TypeScript, no React/RN imports
   *.test.ts               Jest suite for the above
 
 src/notes/               note storage + pure helpers, no AI
-  noteRepository.ts      file-backed CRUD: list/create/read/write/delete/restore/purge
+  noteRepository.ts      file-backed CRUD; wraps every FS call as NoteStoreError
   agentNoteStore.ts       adapts noteRepository to the agent's single-note NoteStore interface
   title.ts                derives title + preview from body (never stored)
   undoStack.ts            snapshot undo/redo, pushed at debounced save boundaries
+  trashName.ts            encodes deletion time in trashed filenames (mtime is not a usable proxy)
   relativeTime.ts          list-row timestamp formatting
   *.test.ts               Jest suite for the pure pieces above
 
@@ -60,7 +61,9 @@ src/theme/               light/dark/system theming, orange accent
 
 src/screens/             app UI
   NoteListScreen.tsx      flat list, swipe-to-delete + undo snackbar, create FAB
-  NoteEditorScreen.tsx    editor + wires runTurn(): soft-lock, turn-level undo, error mapping
+  NoteEditorScreen.tsx    presentation only — composes the two hooks below
+  useNoteSession.ts       one note's body: debounced saves, lifecycle flush, undo/redo, save errors
+  useAgentTurn.ts         one agent turn: credentials, provider, history, cancel/timeout, error mapping
   AgentFab.tsx            floating Undo/Redo/Ask-AI cluster; FAB becomes the send button when open
   SettingsScreen.tsx      API key/model, Appearance (Light/Dark/System), About
 
@@ -104,13 +107,17 @@ cp .env.example .env
 
 The agent core has zero dependency on React or React Native, specifically so it can be tested in Node with no simulator and no network — see PRD §11 and §12 for why this ordering matters. `src/agent/providers/mock.ts` provides a scripted `Provider` so loop behavior (tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback) is fully deterministic in tests.
 
-`npm test` never talks to a real model — it's all against the mock provider. `OpenRouterProvider` (streaming SSE, tool-call parsing) **has** been validated against the live API, both via this script and via a real AI-edited note in the app on an iOS simulator:
+`npm test` never talks to a real model — it's all against the mock provider. `OpenRouterProvider` also has deterministic unit tests (`src/agent/providers/openrouter.test.ts`) covering the wire-format cases a happy-path request never reaches: events fragmented across chunk boundaries, CRLF separators, streams that end without a terminator, tool calls closed with an unexpected `finish_reason`, truncated tool-call JSON, and HTTP status→error-kind mapping. `fetch` is injected there rather than stubbed globally.
+
+Separately, it **has** been validated against the live API, both via the script below and via a real AI-edited note in the app on an iOS simulator:
 
 ```bash
 npm run test:live
 ```
 
-This runs one real turn against OpenRouter (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. Without `OPENROUTER_API_KEY`/`OPENROUTER_DEFAULT_MODEL` set in `.env`, it skips with instructions instead of failing. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident. Still open: validation on **physical** iOS/Android hardware, not just simulator — RN's fetch-streaming support has historically been fragile on real devices in ways a simulator doesn't always reproduce.
+This runs one real turn against OpenRouter (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. Without `OPENROUTER_API_KEY`/`OPENROUTER_DEFAULT_MODEL` set in `.env`, it skips with instructions instead of failing. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident.
+
+**What the live test does not prove:** it runs under Node, where `globalThis.fetch` is undici, so it exercises a different transport than the app. It validates OpenRouter's wire format, not React Native's — which is why the app now passes `expo/fetch` into `OpenRouterProvider` explicitly (RN's own `fetch` cannot stream at all) and why the SSE edge cases are covered deterministically rather than by the live run. Still open: validation on **physical** iOS/Android hardware, not just simulator.
 
 ## License
 

@@ -428,7 +428,8 @@ Every case needs a message a non-technical user can act on.
 | Model lacks tool calling | Detect the provider error, report plainly, suggest a listed model. |
 | Offline | `No internet connection.` Detected before the request. Editing unaffected. |
 | Timeout (120 s) | `The model took too long.` Turn is abandoned; any applied edits remain undoable. |
-| Malformed tool arguments | Return a parse error to the model and retry within the iteration budget. |
+| Malformed tool arguments | Return a validation error to the model and retry within the iteration budget. Enforced at the tool boundary in `src/agent/tools.ts`: arguments are validated before anything touches the note, so a truncated or wrong-typed tool call can never write `undefined` over a note or throw out of the turn. |
+| Cancelled vs. timed out | Distinct outcomes, never conflated. The UI aborts with the `TURN_TIMEOUT` reason on a deadline, so a 120 s timeout reports as a timeout and a user cancel reports as cancelled — regardless of whether the abort surfaces as a thrown `AbortError` or a provider error event. |
 | Loop exhausted | `Stopped after 8 steps.` Applied edits stay. |
 | Note too large (>2 MB) | Prompt bar disabled for that note with a reason. Editing still works. |
 | Disk write failure | Surface immediately and loudly. Silent data loss is the worst outcome in the app. |
@@ -443,7 +444,7 @@ Every case needs a message a non-technical user can act on.
 | Navigation | Plain component state (list ↔ editor) | Two screens don't justify `expo-router` yet; adopt it when screen count grows (e.g. Settings in M3). |
 | Files | `expo-file-system` | Notes as `.md`. |
 | Secure storage | `expo-secure-store` | API key only. |
-| HTTP / streaming | `expo/fetch` | Streaming SSE support; RN's default `fetch` does not stream. **Validate on a physical device early.** |
+| HTTP / streaming | `expo/fetch`, **injected** into `OpenRouterProvider` | Streaming SSE support; RN's default `fetch` is `whatwg-fetch` over XHR and its `Response` exposes no `body` at all, so SSE cannot be read from it. Expo SDK 57 *does* replace `globalThis.fetch` with its streaming implementation, but that is an implicit side effect gated on `EXPO_PUBLIC_USE_RN_FETCH` — so the app passes `expo/fetch` explicitly rather than depending on a global patch the framework-free agent core can't see. **Validate on a physical device early.** |
 | Markdown editor | `TextInput` + `react-native-markdown-display`, toggled | Decided post-spike — see §7.2. Live inline formatting deferred to v1.1. Requires the `punycode` npm package as a real dependency (not unused) — `markdown-it`, its transitive dependency, imports Node's `punycode` core module, absent from the RN runtime. |
 | Diff | `fast-diff` or `diff-match-patch` | Word-level, for highlighting. |
 | IDs | `ulid` | Sortable, collision-free. Requires `react-native-get-random-values` imported first in `src/app/index.ts` — Hermes has no native `crypto.getRandomValues`. |
@@ -480,7 +481,8 @@ Every case needs a message a non-technical user can act on.
 
 - **Model quality variance** is the top product risk. A user on a weak free model will experience the app as broken. Mitigations: force `rewrite_note` on small notes, a curated model list, clear error messages. Consider a first-run compatibility check.
 - **Cost surprise.** Whole-note rewrites on long notes burn output tokens. Consider surfacing per-turn token usage from the OpenRouter response.
-- **Streaming on RN** has historically been fragile. Confirmed working on an iOS **simulator** (§11 M3) — physical iOS and Android hardware still untested, and simulators don't always reproduce real-device fetch/streaming issues. Do this before M5, not during it.
+- **Streaming on RN** has historically been fragile. Confirmed working on an iOS **simulator** (§11 M3) — physical iOS and Android hardware still untested, and simulators don't always reproduce real-device fetch/streaming issues. Do this before M5, not during it. The mechanism is now explicit rather than incidental: `expo/fetch` is injected into `OpenRouterProvider` (§10), because RN's own `fetch` cannot stream at all and the app was previously relying on Expo silently replacing the global.
+- **The live smoke test cannot catch RN-specific transport bugs.** `npm run test:live` runs under Node, where `globalThis.fetch` is undici and streams fine — a different code path from the app's. It validates the OpenRouter *wire format*, not React Native's transport. Only a device or simulator run covers that, which is why the deterministic adapter tests (`src/agent/providers/openrouter.test.ts`) cover the fragmented/terminator/finish_reason cases instead of trusting the live test.
 - **App Store review.** BYO-key AI apps are permitted, but reviewers sometimes ask about unmoderated content. Expect one round of questions.
 - **RN runtime gaps surface late, not at build time.** Getting M1 running on an iOS simulator surfaced three separate issues that a clean `tsc`/web-bundle check did not catch: `ulid` needs a `crypto.getRandomValues` polyfill Hermes doesn't provide (`react-native-get-random-values`), `react-native-markdown-display`'s `markdown-it` dependency imports Node's `punycode` core module which doesn't exist in the RN runtime (fixed by installing the userland `punycode` package), and `expo-file-system`'s new `Directory`/`File` classes don't work on web at all despite compiling cleanly. Full details and fixes: `AGENTS.md` → "Environment gotchas." Lesson for future milestones: a compiling web bundle proves far less than an actual simulator run — budget for this class of surprise in M3/M4 too, not just M1.
 
