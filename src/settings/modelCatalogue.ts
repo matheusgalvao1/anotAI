@@ -42,12 +42,19 @@ export type CatalogueResult = {
  * network must never leave someone unable to set a model.
  */
 export async function loadModels(providerId: ProviderId, apiKey: string | null): Promise<CatalogueResult> {
+  const provider = describeProvider(providerId);
+  // No adapter means no catalogue to read and no turn to run. Say so plainly
+  // rather than firing a request that can only fail.
+  if (!provider.supported || provider.modelsUrl === null) {
+    return { models: [], stale: false, error: `${provider.label} isn't supported yet.` };
+  }
+
   const cached = await readCache(providerId);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(describeProvider(providerId).modelsUrl, {
+    const response = await fetch(provider.modelsUrl, {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
       signal: controller.signal,
     });

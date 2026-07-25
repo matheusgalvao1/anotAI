@@ -411,11 +411,11 @@ Clears on the next prompt, on manual typing, or after 30 s. Never accumulates hi
 
 ### 7.7 Settings
 - **Appearance** — Light / Dark / System.
-- **Providers** — add a provider from a picker; adding one reveals its masked, paste-friendly key field. Any number can be configured at once. Removing one deletes its key, and clears the model selection if that model was served by it — a selection whose provider is gone cannot run.
-- **Model** — a single picker across every configured provider, **grouped by provider and alphabetical within each group**. No typing in the normal case.
+- **API keys** — one field per provider, always all four present: OpenRouter, OpenAI, Anthropic, Google. No adding or removing. Each has reveal, paste and check buttons. Only OpenRouter has an adapter; the rest are marked `not supported yet` and can hold a key ahead of one landing.
+- **Model** — two dropdowns: provider, then model. The model list is scoped to the chosen provider, so it is flat and alphabetical rather than grouped. Changing provider clears a model the previous one served, since it cannot be served by the new one.
 - **No Save button.** Keys persist on a 500 ms debounce, matching the editor's own, and are flushed when the screen closes so a key typed in the last half-second isn't lost. The model selection persists the moment it's picked.
-- **Validate** — an icon button in the key row, beside reveal and paste. Needs a model chosen for that provider, since a key can only be checked against a model.
-- **No About section, and no explanatory copy in the sections.** Status messages stay (validation result, "showing the last known list"); static explanation does not.
+- **Check** — the icon button in each key row. Needs a model chosen for that provider, since a key can only be checked against a model.
+- **No About section, and no explanatory copy in the sections.** Status messages stay (check result, `not supported yet`, "showing the last known list"); static explanation does not.
 
 > **Open gap:** removing About and the section hints removed the app's only privacy statements — that keys live in the OS keychain and that notes never leave the device. §8 still requires the guarantee; nothing in the UI now states it. Wants a home, most likely on a first-run screen or in the list's empty state.
 

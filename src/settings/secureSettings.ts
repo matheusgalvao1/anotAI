@@ -1,6 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { ModelSelection, parseSelection } from "./modelSelection";
-import { PROVIDERS, ProviderId } from "./providers";
+import { ProviderId } from "./providers";
 
 // Naming matches the <PROVIDER>_API_KEY convention from .env.example
 // (PRD §14.1) — dev/test tooling reads env vars, the shipped app reads the OS
@@ -27,14 +27,6 @@ export async function setProviderKey(providerId: ProviderId, key: string): Promi
 
 export async function clearProviderKey(providerId: ProviderId): Promise<void> {
   await SecureStore.deleteItemAsync(keyStorageKey(providerId));
-}
-
-/** Every provider that currently holds a key — the ones the user has "added". */
-export async function getConfiguredProviderIds(): Promise<ProviderId[]> {
-  const entries = await Promise.all(
-    PROVIDERS.map(async (provider) => ({ id: provider.id, key: await getProviderKey(provider.id) })),
-  );
-  return entries.filter((entry) => entry.key !== null && entry.key.length > 0).map((entry) => entry.id);
 }
 
 export async function getSelectedModel(): Promise<ModelSelection | null> {

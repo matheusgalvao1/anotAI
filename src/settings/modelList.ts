@@ -6,7 +6,7 @@
  * therefore a device. Same split as src/notes: pure text logic apart from the
  * filesystem that feeds it.
  */
-import { describeProvider, ProviderId } from "./providers";
+import { ProviderId } from "./providers";
 
 export type CatalogueModel = {
   id: string;
@@ -15,18 +15,6 @@ export type CatalogueModel = {
   providerId: ProviderId;
 };
 
-export type ModelGroup = { providerId: ProviderId; label: string; models: CatalogueModel[] };
-
-/**
- * Turns OpenRouter's `/models` response into the list worth offering.
- *
- * Filters to models that support tool calling: the agent cannot function
- * without it, so listing the rest would be offering a choice that is already
- * broken. OpenRouter reports this in `supported_parameters`.
- *
- * Tolerant by design — an unexpected entry is skipped rather than failing the
- * whole catalogue, because one malformed row shouldn't cost the user the picker.
- */
 export function parseOpenRouterModels(payload: unknown): CatalogueModel[] {
   const data = (payload as { data?: unknown })?.data;
   if (!Array.isArray(data)) return [];
@@ -47,23 +35,15 @@ export function parseOpenRouterModels(payload: unknown): CatalogueModel[] {
 }
 
 /**
- * Groups by provider and sorts alphabetically within each group, so a long list
- * is scannable. Case-insensitive, since model names are inconsistently
- * capitalised across vendors and a naive sort scatters them.
+ * Alphabetical by display name, case-insensitively.
+ *
+ * Case matters here: vendors capitalise inconsistently, and a naive sort puts
+ * every lowercase name after every uppercase one, scattering the list.
+ *
+ * Grouping by provider used to live here. It went when the picker became
+ * provider-then-model: the list only ever shows one provider's models now, so a
+ * group label would just repeat the dropdown above it.
  */
-export function groupModels(models: CatalogueModel[]): ModelGroup[] {
-  const byProvider = new Map<ProviderId, CatalogueModel[]>();
-  for (const model of models) {
-    const existing = byProvider.get(model.providerId);
-    if (existing) existing.push(model);
-    else byProvider.set(model.providerId, [model]);
-  }
-
-  return [...byProvider.entries()]
-    .map(([providerId, group]) => ({
-      providerId,
-      label: describeProvider(providerId).label,
-      models: [...group].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+export function sortModels(models: CatalogueModel[]): CatalogueModel[] {
+  return [...models].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }

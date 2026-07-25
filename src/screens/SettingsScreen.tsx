@@ -3,13 +3,11 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { loadModels } from "../settings/modelCatalogue";
-import { CatalogueModel, groupModels } from "../settings/modelList";
+import { CatalogueModel, sortModels } from "../settings/modelList";
 import { ModelSelection } from "../settings/modelSelection";
 import { describeProvider, PROVIDERS, ProviderId } from "../settings/providers";
 import {
-  clearProviderKey,
   clearSelectedModel,
-  getConfiguredProviderIds,
   getProviderKey,
   getSelectedModel,
   setProviderKey,
@@ -19,7 +17,7 @@ import { validateApiKey } from "../settings/validateApiKey";
 import { Icon, IconName } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { ThemePreference, useTheme } from "../theme/ThemeContext";
-import { Dropdown, DropdownSection } from "./Dropdown";
+import { Dropdown } from "./Dropdown";
 
 /** Matches the editor's own debounce, so "saving" feels the same everywhere. */
 const SAVE_DEBOUNCE_MS = 500;
@@ -29,6 +27,8 @@ const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: IconNam
   { value: "dark", label: "Dark", icon: "dark" },
   { value: "system", label: "System", icon: "system" },
 ];
+
+type Keys = Partial<Record<ProviderId, string>>;
 
 type Props = { onBack: () => void };
 
@@ -58,12 +58,18 @@ export function SettingsScreen({ onBack }: Props) {
   const { colors, preference, setPreference } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  /** Keys held in the form, per provider. A provider is "added" once it has an entry. */
-  const [keys, setKeys] = useState<Partial<Record<ProviderId, string>>>({});
+  const [keys, setKeys] = useState<Keys>({});
   const [revealed, setRevealed] = useState<Partial<Record<ProviderId, boolean>>>({});
-  const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [validating, setValidating] = useState<ProviderId | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
+
+  /**
+   * The provider chosen in the Model section. Held apart from `selection`, which
+   * only exists once a model has been picked too — you can have chosen a provider
+   * and not yet a model.
+   */
+  const [providerId, setProviderId] = useState<ProviderId | null>(null);
+  const [selection, setSelection] = useState<ModelSelection | null>(null);
 
   const [models, setModels] = useState<CatalogueModel[]>([]);
   const [catalogueError, setCatalogueError] = useState<string | null>(null);
@@ -76,36 +82,32 @@ export function SettingsScreen({ onBack }: Props) {
   const keysRef = useRef(keys);
   keysRef.current = keys;
 
-  const addedProviders = useMemo(() => Object.keys(keys) as ProviderId[], [keys]);
-  const unaddedProviders = useMemo(() => PROVIDERS.filter((provider) => !(provider.id in keys)), [keys]);
-
   useEffect(() => {
     (async () => {
-      const [configured, storedSelection] = await Promise.all([getConfiguredProviderIds(), getSelectedModel()]);
-      const loaded: Partial<Record<ProviderId, string>> = {};
+      const loaded: Keys = {};
       await Promise.all(
-        configured.map(async (id) => {
-          loaded[id] = (await getProviderKey(id)) ?? "";
+        PROVIDERS.map(async (provider) => {
+          loaded[provider.id] = (await getProviderKey(provider.id)) ?? "";
         }),
       );
+      const stored = await getSelectedModel();
       setKeys(loaded);
-      setSelection(storedSelection);
-      if (storedSelection) setManualModel(storedSelection.modelId);
+      setSelection(stored);
+      setProviderId(stored?.providerId ?? null);
+      if (stored) setManualModel(stored.modelId);
     })();
   }, []);
 
-  const persistKeys = useCallback(async (next: Partial<Record<ProviderId, string>>) => {
-    await Promise.all(
-      (Object.keys(next) as ProviderId[]).map((id) => setProviderKey(id, (next[id] ?? "").trim())),
-    );
+  const persistKeys = useCallback(async (next: Keys) => {
+    await Promise.all((Object.keys(next) as ProviderId[]).map((id) => setProviderKey(id, (next[id] ?? "").trim())));
   }, []);
 
   /** There is no Save button, so every edit schedules its own write. */
   const editKey = useCallback(
-    (providerId: ProviderId, text: string) => {
+    (id: ProviderId, text: string) => {
       setFeedback(null);
       setKeys((current) => {
-        const next = { ...current, [providerId]: text };
+        const next = { ...current, [id]: text };
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
           saveTimer.current = null;
@@ -128,62 +130,45 @@ export function SettingsScreen({ onBack }: Props) {
     [persistKeys],
   );
 
-  const refreshModels = useCallback(
-    async (providerIds: ProviderId[], currentKeys: Partial<Record<ProviderId, string>>) => {
-      if (providerIds.length === 0) {
-        setModels([]);
-        setCatalogueError(null);
-        setCatalogueStale(false);
-        return;
-      }
-      setLoadingModels(true);
-      const results = await Promise.all(providerIds.map((id) => loadModels(id, currentKeys[id]?.trim() || null)));
-      setModels(results.flatMap((result) => result.models));
-      setCatalogueStale(results.some((result) => result.stale));
-      const firstError = results.find((result) => result.error !== null)?.error ?? null;
-      setCatalogueError(results.every((result) => result.models.length === 0) ? firstError : null);
-      setLoadingModels(false);
-    },
-    [],
-  );
-
-  // Reloaded whenever the set of added providers changes: the list is the union
-  // across them, so adding or removing one changes what should be on offer.
+  /** Only the chosen provider's catalogue is fetched — the model list is scoped to it. */
   useEffect(() => {
-    void refreshModels(addedProviders, keysRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keys are read, not tracked; a keystroke must not refetch
-  }, [addedProviders.join(","), refreshModels]);
+    if (!providerId) {
+      setModels([]);
+      setCatalogueError(null);
+      setCatalogueStale(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingModels(true);
+    void loadModels(providerId, keysRef.current[providerId]?.trim() || null).then((result) => {
+      if (cancelled) return;
+      setModels(result.models);
+      setCatalogueStale(result.stale);
+      setCatalogueError(result.error);
+      setLoadingModels(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [providerId]);
 
-  const modelSections: DropdownSection<string>[] = useMemo(
-    () =>
-      groupModels(models.filter((model) => addedProviders.includes(model.providerId))).map((group) => ({
-        label: group.label,
-        options: group.models.map((model) => ({ value: model.id, label: model.name, detail: model.id })),
-      })),
-    [models, addedProviders],
+  const modelOptions = useMemo(
+    () => sortModels(models).map((model) => ({ value: model.id, label: model.name, detail: model.id })),
+    [models],
   );
 
-  const handleAddProvider = (providerId: ProviderId) => {
+  const chooseProvider = async (next: ProviderId) => {
+    setProviderId(next);
     setFeedback(null);
-    setKeys((current) => ({ ...current, [providerId]: "" }));
-  };
-
-  const handleRemoveProvider = async (providerId: ProviderId) => {
-    await clearProviderKey(providerId);
-    setKeys((current) => {
-      const next = { ...current };
-      delete next[providerId];
-      return next;
-    });
-    // A selection served by a provider that's gone can't run, so it goes too.
-    if (selection?.providerId === providerId) {
+    // A model from the previous provider can't be served by this one, so it goes.
+    if (selection && selection.providerId !== next) {
       await clearSelectedModel();
       setSelection(null);
+      setManualModel("");
     }
-    setFeedback(null);
   };
 
-  const handlePaste = async (providerId: ProviderId) => {
+  const handlePaste = async (id: ProviderId) => {
     const text = (await Clipboard.getStringAsync()).trim();
     if (!text) {
       // Silence here is indistinguishable from a broken button. On the
@@ -192,17 +177,22 @@ export function SettingsScreen({ onBack }: Props) {
       setFeedback({ kind: "error", message: "Clipboard is empty — nothing to paste." });
       return;
     }
-    editKey(providerId, text);
+    editKey(id, text);
   };
 
-  const handleValidate = async (providerId: ProviderId) => {
-    const key = (keys[providerId] ?? "").trim();
+  const handleValidate = async (id: ProviderId) => {
+    const provider = describeProvider(id);
+    if (!provider.supported) {
+      setFeedback({ kind: "error", message: `${provider.label} isn't supported yet.` });
+      return;
+    }
+    const key = (keys[id] ?? "").trim();
     if (!key) {
       setFeedback({ kind: "error", message: "Enter a key first." });
       return;
     }
-    if (!selection || selection.providerId !== providerId) {
-      setFeedback({ kind: "error", message: `Choose a ${describeProvider(providerId).label} model first.` });
+    if (!selection || selection.providerId !== id) {
+      setFeedback({ kind: "error", message: `Choose a ${provider.label} model below first.` });
       return;
     }
 
@@ -213,14 +203,13 @@ export function SettingsScreen({ onBack }: Props) {
       await persistKeys(keys);
     }
 
-    setValidating(providerId);
+    setValidating(id);
     const result = await validateApiKey(key, selection.modelId);
     setValidating(null);
     setFeedback(result.ok ? { kind: "ok", message: "Key and model work." } : { kind: "error", message: result.message });
-    if (result.ok) void refreshModels(addedProviders, keys);
   };
 
-  const selectedLabel = useMemo(() => {
+  const selectedModelLabel = useMemo(() => {
     if (!selection) return null;
     return models.find((model) => model.id === selection.modelId)?.name ?? selection.modelId;
   }, [selection, models]);
@@ -263,44 +252,43 @@ export function SettingsScreen({ onBack }: Props) {
           </View>
         </Section>
 
-        <Section icon="key" title="Providers">
-          {addedProviders.map((providerId) => (
-            <View key={providerId} style={styles.providerBlock}>
+        <Section icon="key" title="API keys">
+          {PROVIDERS.map((provider) => (
+            <View key={provider.id} style={styles.providerBlock}>
               <View style={styles.providerHeader}>
-                <Text style={styles.providerName}>{describeProvider(providerId).label}</Text>
-                <Pressable onPress={() => void handleRemoveProvider(providerId)} hitSlop={8}>
-                  <Icon name="delete" size={17} color={colors.danger} />
-                </Pressable>
+                <Text style={styles.providerName}>{provider.label}</Text>
+                {/* State, not explanation: this one's key can be stored but not used yet. */}
+                {!provider.supported && <Text style={styles.badge}>not supported yet</Text>}
               </View>
               <View style={styles.inputRow}>
                 <TextInput
-                  value={keys[providerId] ?? ""}
-                  onChangeText={(text) => editKey(providerId, text)}
-                  placeholder={describeProvider(providerId).keyPlaceholder}
+                  value={keys[provider.id] ?? ""}
+                  onChangeText={(text) => editKey(provider.id, text)}
+                  placeholder={provider.keyPlaceholder}
                   placeholderTextColor={colors.textMuted}
-                  secureTextEntry={!revealed[providerId]}
+                  secureTextEntry={!revealed[provider.id]}
                   autoCapitalize="none"
                   autoCorrect={false}
                   style={[styles.input, styles.inputFlex]}
                 />
                 <Pressable
-                  onPress={() => setRevealed((current) => ({ ...current, [providerId]: !current[providerId] }))}
+                  onPress={() => setRevealed((current) => ({ ...current, [provider.id]: !current[provider.id] }))}
                   hitSlop={8}
                   style={styles.inputIconButton}
                 >
-                  <Icon name={revealed[providerId] ? "conceal" : "reveal"} size={19} color={colors.textSecondary} />
+                  <Icon name={revealed[provider.id] ? "conceal" : "reveal"} size={19} color={colors.textSecondary} />
                 </Pressable>
-                <Pressable onPress={() => void handlePaste(providerId)} hitSlop={8} style={styles.inputIconButton}>
+                <Pressable onPress={() => void handlePaste(provider.id)} hitSlop={8} style={styles.inputIconButton}>
                   <Icon name="clipboard" size={19} color={colors.textSecondary} />
                 </Pressable>
                 <Pressable
-                  onPress={() => void handleValidate(providerId)}
+                  onPress={() => void handleValidate(provider.id)}
                   hitSlop={8}
                   style={styles.inputIconButton}
                   disabled={validating !== null}
-                  accessibilityLabel="Check this key and model"
+                  accessibilityLabel={`Check the ${provider.label} key`}
                 >
-                  {validating === providerId ? (
+                  {validating === provider.id ? (
                     <ActivityIndicator size="small" color={colors.textSecondary} />
                   ) : (
                     <Icon name="validate" size={19} color={colors.textSecondary} />
@@ -310,15 +298,6 @@ export function SettingsScreen({ onBack }: Props) {
             </View>
           ))}
 
-          {unaddedProviders.length > 0 && (
-            <Dropdown
-              placeholder="Add provider"
-              selected={null}
-              sections={[{ options: unaddedProviders.map((provider) => ({ value: provider.id, label: provider.label })) }]}
-              onSelect={(value) => handleAddProvider(value as ProviderId)}
-            />
-          )}
-
           {feedback && (
             <Text style={feedback.kind === "ok" ? styles.successText : styles.errorText}>{feedback.message}</Text>
           )}
@@ -326,16 +305,32 @@ export function SettingsScreen({ onBack }: Props) {
 
         <Section icon="model" title="Model">
           <Dropdown
-            placeholder={addedProviders.length === 0 ? "Add a provider first" : "Choose a model"}
+            placeholder="Choose a provider"
+            selected={providerId}
+            selectedLabel={providerId ? describeProvider(providerId).label : null}
+            sections={[
+              {
+                options: PROVIDERS.map((provider) => ({
+                  value: provider.id,
+                  label: provider.label,
+                  detail: provider.supported ? undefined : "not supported yet",
+                })),
+              },
+            ]}
+            onSelect={(value) => void chooseProvider(value as ProviderId)}
+          />
+
+          <Dropdown
+            placeholder={providerId ? "Choose a model" : "Choose a provider first"}
             selected={selection?.modelId ?? null}
-            selectedLabel={selectedLabel}
-            sections={modelSections}
-            disabled={addedProviders.length === 0}
+            selectedLabel={selectedModelLabel}
+            sections={[{ options: modelOptions }]}
+            disabled={!providerId}
             loading={loadingModels}
-            emptyMessage={loadingModels ? "Loading models…" : "No tool-calling models available."}
+            emptyMessage={loadingModels ? "Loading models…" : (catalogueError ?? "No tool-calling models available.")}
             onSelect={(modelId) => {
-              const found = models.find((model) => model.id === modelId);
-              const next = { providerId: found?.providerId ?? addedProviders[0] ?? "openrouter", modelId };
+              if (!providerId) return;
+              const next = { providerId, modelId };
               setSelection(next);
               void setSelectedModel(next);
               setFeedback(null);
@@ -345,7 +340,7 @@ export function SettingsScreen({ onBack }: Props) {
           {/* State, not explanation: the list on screen may be out of date. */}
           {catalogueStale && <Text style={styles.noticeText}>Showing the last known list — the provider couldn't be reached.</Text>}
 
-          {catalogueError && (
+          {providerId && catalogueError && (
             <View style={styles.fallbackBlock}>
               <Text style={styles.errorText}>{catalogueError}</Text>
               {/* The escape hatch: unable to reach the network must never leave
@@ -355,8 +350,8 @@ export function SettingsScreen({ onBack }: Props) {
                 onChangeText={setManualModel}
                 onEndEditing={() => {
                   const modelId = manualModel.trim();
-                  if (!modelId) return;
-                  const next = { providerId: addedProviders[0] ?? "openrouter", modelId };
+                  if (!modelId || !providerId) return;
+                  const next = { providerId, modelId };
                   setSelection(next);
                   void setSelectedModel(next);
                 }}
@@ -370,7 +365,6 @@ export function SettingsScreen({ onBack }: Props) {
           )}
         </Section>
       </ScrollView>
-
     </SafeAreaView>
   );
 }
@@ -415,8 +409,9 @@ const makeStyles = (colors: Palette) =>
     appearanceOptionSelected: { borderColor: colors.accent, borderWidth: 1.5 },
     appearanceLabel: { fontSize: 12, fontWeight: "600", color: colors.textSecondary },
     providerBlock: { gap: 8 },
-    providerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    providerHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
     providerName: { fontSize: 14, fontWeight: "600", color: colors.text },
+    badge: { fontSize: 11, color: colors.textMuted },
     inputRow: { flexDirection: "row", alignItems: "center", gap: 6 },
     inputFlex: { flex: 1 },
     inputIconButton: { padding: 4 },

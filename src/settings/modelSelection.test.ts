@@ -24,9 +24,10 @@ describe("parseSelection", () => {
   });
 
   it("rejects an unknown provider id", () => {
-    // Guards a downgrade after a second provider ships: an id this build can't
-    // serve must not be treated as configured.
-    expect(parseSelection('{"providerId":"anthropic","modelId":"claude"}')).toBeNull();
+    // Guards a downgrade after a new provider ships: an id this build doesn't
+    // know must not be treated as configured. ("anthropic" is a real id now, so
+    // this deliberately uses one that isn't.)
+    expect(parseSelection('{"providerId":"mistral","modelId":"mistral-large"}')).toBeNull();
   });
 
   it("rejects a missing or empty model id", () => {
