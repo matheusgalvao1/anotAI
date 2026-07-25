@@ -10,7 +10,6 @@
     "jest.config.js",
     "android",
     "ios",
-    "src/agent/**/*.test.ts",
-    "src/notes/**/*.test.ts"
+    "src/**/*.test.ts"
   ]
 }

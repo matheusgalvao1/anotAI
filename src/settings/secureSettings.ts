@@ -1,27 +1,59 @@
 import * as SecureStore from "expo-secure-store";
+import { ModelSelection, parseSelection } from "./modelSelection";
+import { PROVIDERS, ProviderId } from "./providers";
 
-// Naming matches the <PROVIDER>_API_KEY / <PROVIDER>_DEFAULT_MODEL convention
-// from .env.example (PRD §14.1) — dev/test tooling reads env vars, the
-// shipped app reads the OS keychain. Never the reverse (PRD §8).
-const API_KEY_STORAGE_KEY = "OPENROUTER_API_KEY";
-const DEFAULT_MODEL_STORAGE_KEY = "OPENROUTER_DEFAULT_MODEL";
-
-export async function getApiKey(): Promise<string | null> {
-  return SecureStore.getItemAsync(API_KEY_STORAGE_KEY);
+// Naming matches the <PROVIDER>_API_KEY convention from .env.example
+// (PRD §14.1) — dev/test tooling reads env vars, the shipped app reads the OS
+// keychain. Never the reverse (PRD §8).
+//
+// That convention is why keys need no migration: the single key this app used to
+// store already lived at OPENROUTER_API_KEY, which is exactly what
+// `keyStorageKey("openrouter")` produces.
+function keyStorageKey(providerId: ProviderId): string {
+  return `${providerId.toUpperCase()}_API_KEY`;
 }
 
-export async function setApiKey(key: string): Promise<void> {
-  await SecureStore.setItemAsync(API_KEY_STORAGE_KEY, key);
+const SELECTED_MODEL_STORAGE_KEY = "SELECTED_MODEL";
+/** What the model used to be stored under, before a selection knew its provider. */
+const LEGACY_MODEL_STORAGE_KEY = "OPENROUTER_DEFAULT_MODEL";
+
+export async function getProviderKey(providerId: ProviderId): Promise<string | null> {
+  return SecureStore.getItemAsync(keyStorageKey(providerId));
 }
 
-export async function clearApiKey(): Promise<void> {
-  await SecureStore.deleteItemAsync(API_KEY_STORAGE_KEY);
+export async function setProviderKey(providerId: ProviderId, key: string): Promise<void> {
+  await SecureStore.setItemAsync(keyStorageKey(providerId), key);
 }
 
-export async function getDefaultModel(): Promise<string | null> {
-  return SecureStore.getItemAsync(DEFAULT_MODEL_STORAGE_KEY);
+export async function clearProviderKey(providerId: ProviderId): Promise<void> {
+  await SecureStore.deleteItemAsync(keyStorageKey(providerId));
 }
 
-export async function setDefaultModel(model: string): Promise<void> {
-  await SecureStore.setItemAsync(DEFAULT_MODEL_STORAGE_KEY, model);
+/** Every provider that currently holds a key — the ones the user has "added". */
+export async function getConfiguredProviderIds(): Promise<ProviderId[]> {
+  const entries = await Promise.all(
+    PROVIDERS.map(async (provider) => ({ id: provider.id, key: await getProviderKey(provider.id) })),
+  );
+  return entries.filter((entry) => entry.key !== null && entry.key.length > 0).map((entry) => entry.id);
 }
+
+export async function getSelectedModel(): Promise<ModelSelection | null> {
+  const stored = await SecureStore.getItemAsync(SELECTED_MODEL_STORAGE_KEY);
+  const parsed = parseSelection(stored);
+  if (parsed) return parsed;
+
+  // Read-through fallback, not a destructive migration: someone upgrading with a
+  // model already set keeps it, and nothing is deleted in case they downgrade.
+  const legacy = await SecureStore.getItemAsync(LEGACY_MODEL_STORAGE_KEY);
+  return legacy && legacy.length > 0 ? { providerId: "openrouter", modelId: legacy } : null;
+}
+
+export async function setSelectedModel(selection: ModelSelection): Promise<void> {
+  await SecureStore.setItemAsync(SELECTED_MODEL_STORAGE_KEY, JSON.stringify(selection));
+}
+
+export async function clearSelectedModel(): Promise<void> {
+  await SecureStore.deleteItemAsync(SELECTED_MODEL_STORAGE_KEY);
+}
+
+export type { ModelSelection };

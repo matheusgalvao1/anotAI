@@ -12,7 +12,7 @@ import {
 import { FileNoteStore } from "../notes/agentNoteStore";
 import { ChangedRange, changedRange } from "../notes/changedRange";
 import { deriveTitleAndPreview } from "../notes/title";
-import { getApiKey, getDefaultModel } from "../settings/secureSettings";
+import { getProviderKey, getSelectedModel } from "../settings/secureSettings";
 
 const STATUS_CLEAR_MS = 30_000;
 /** How long a change stays tinted before the editor comes back (PRD §7.5). */
@@ -125,13 +125,14 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [apiKey, model] = await Promise.all([getApiKey(), getDefaultModel()]);
+      const selection = await getSelectedModel();
+      const apiKey = selection ? await getProviderKey(selection.providerId) : null;
       if (cancelled) return;
-      if (!apiKey || !model) {
-        setDisabledReason("Set your OpenRouter API key in Settings to enable AI editing.");
+      if (!selection || !apiKey) {
+        setDisabledReason("Add a provider and choose a model in Settings to enable AI editing.");
         return;
       }
-      credentialsRef.current = { apiKey, model };
+      credentialsRef.current = { apiKey, model: selection.modelId };
       setDisabledReason(null);
     })();
     return () => {

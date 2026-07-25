@@ -410,10 +410,21 @@ Clears on the next prompt, on manual typing, or after 30 s. Never accumulates hi
 - Reachable via the platform gesture and an explicit button in the editor toolbar, since shake-to-undo is undiscoverable.
 
 ### 7.7 Settings
-- **OpenRouter API key** — masked input, paste-friendly, Validate button, Clear button. Copy stating the key is stored in the OS keychain and sent only to OpenRouter.
-- **Model** — text field for a model ID plus a short curated list of known-good tool-calling models. Free text is allowed; OpenRouter's catalog changes constantly.
-- **Compaction model** (optional) — defaults to the main model.
+- **Appearance** — Light / Dark / System.
+- **Providers** — add a provider from a picker; adding one reveals its masked, paste-friendly key field. Any number can be configured at once. Removing one deletes its key, and clears the model selection if that model was served by it — a selection whose provider is gone cannot run.
+- **Model** — a single picker across every configured provider, **grouped by provider and alphabetical within each group**. No typing in the normal case.
+- **Save** — one button. It stores the keys and selection, then validates the selected pair as a matter of course. Save and Validate as separate buttons was a two-step nobody expected.
 - **About** — version, notes-directory path, and a plain-language privacy statement.
+
+**Only tool-calling models are listed.** The agent cannot function without tool support, so offering the rest is offering a choice that is already broken. OpenRouter reports this in `supported_parameters`.
+
+**The catalogue is cached, and degrades in two steps.** Fresh list if the provider answers; otherwise the last known list, labelled as stale; otherwise a free-text field. Being offline must never leave someone unable to set a model — free text is the escape hatch, not the primary path.
+
+**Storage is keyed by provider** (`src/settings/secureSettings.ts`). Keys live at `<PROVIDER>_API_KEY`, which is why the upgrade needs no key migration: the single key this app used to store was already at `OPENROUTER_API_KEY`. The model selection carries its provider id and is read through to the legacy `OPENROUTER_DEFAULT_MODEL` when absent — a read-through fallback, not a destructive migration, so a downgrade doesn't lose it.
+
+**Pickers are `Modal` from React Native core**, not `@react-native-picker/picker`: that is a native module, so it would force a dev-client rebuild on every contributor, and its iOS wheel cannot render grouped sections anyway.
+
+**Compaction model** (optional, not built) — would default to the main model.
 
 ---
 
