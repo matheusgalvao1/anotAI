@@ -4,7 +4,7 @@
     "slug": "anotai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./src/app/assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true
@@ -12,14 +12,14 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./src/app/assets/android-icon-foreground.png",
+        "backgroundImage": "./src/app/assets/android-icon-background.png",
+        "monochromeImage": "./src/app/assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./src/app/assets/favicon.png"
     },
     "plugins": [
       "expo-secure-store"

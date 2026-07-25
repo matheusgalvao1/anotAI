@@ -1,6 +1,6 @@
 # anotAI — Product Requirements Document
 
-**Version:** 0.2 (v1 scope)
+**Version:** 0.3 (v1 scope)
 **Date:** 2026-07-25
 **Status:** In development — see §11 for milestone progress
 
@@ -446,7 +446,7 @@ Every case needs a message a non-technical user can act on.
 | HTTP / streaming | `expo/fetch` | Streaming SSE support; RN's default `fetch` does not stream. **Validate on a physical device early.** |
 | Markdown editor | `TextInput` + `react-native-markdown-display`, toggled | Decided post-spike — see §7.2. Live inline formatting deferred to v1.1. Requires the `punycode` npm package as a real dependency (not unused) — `markdown-it`, its transitive dependency, imports Node's `punycode` core module, absent from the RN runtime. |
 | Diff | `fast-diff` or `diff-match-patch` | Word-level, for highlighting. |
-| IDs | `ulid` | Sortable, collision-free. Requires `react-native-get-random-values` imported first in `index.ts` — Hermes has no native `crypto.getRandomValues`. |
+| IDs | `ulid` | Sortable, collision-free. Requires `react-native-get-random-values` imported first in `src/app/index.ts` — Hermes has no native `crypto.getRandomValues`. |
 | State | Zustand or Context | Small surface; no Redux. |
 | Testing | Jest for the agent runtime | Runtime is React-free, so tests need no simulator. |
 
@@ -456,15 +456,15 @@ Every case needs a message a non-technical user can act on.
 
 ## 11. Milestones
 
-**M2 — Agent runtime, headless. ✅ Done.** Loop, three tools, system prompt, provider interface with an OpenRouter adapter, compaction. Built against an in-memory store and unit-tested with **no UI at all** — 25 Jest tests, no simulator, no network. Lives in [`src/agent/`](./src/agent). Built before M1 deliberately: the agent loop is where the risk lives, and it is far cheaper to iterate on in Jest than through a simulator. The `OpenRouterProvider` still needs validation against the live API and on physical hardware before it's trusted (see §12 risks).
+**M2 — Agent runtime, headless. ✅ Done.** Loop, three tools, system prompt, provider interface with an OpenRouter adapter, compaction. Built against an in-memory store and unit-tested with **no UI at all** — 25 Jest tests, no simulator, no network. Lives in [`src/agent/`](./src/agent). Built before M1 deliberately: the agent loop is where the risk lives, and it is far cheaper to iterate on in Jest than through a simulator. The `OpenRouterProvider` has since been validated against the live API (§12 risk: simulator only so far, not physical hardware).
 
-**M1 — Notes app, no AI.** List, editor with live markdown, create/edit/delete, trash, debounced persistence, undo. *Ship-quality on its own.* Not started.
+**M1 — Notes app, no AI. ✅ Done.** List, editor, file storage, trash, undo. Lives in [`src/notes/`](./src/notes) and [`src/screens/`](./src/screens). Manually confirmed on an iOS simulator: create, edit, delete, swipe-to-delete-with-undo, and manual undo/redo all work. Editor is a plain `TextInput` + toggled preview, not live rich rendering — see §7.2 for the post-spike decision.
 
-**M3 — Wire it up.** Prompt bar, status line, soft-lock, turn-level undo, Settings with key validation. Not started.
+**M3 — Wire it up. ✅ Done.** `runTurn()` connected to a real editor: a Settings screen (API key + model, OS keychain via `expo-secure-store`, clipboard paste, live validation against OpenRouter), a FAB-driven prompt composer (soft-lock while a turn runs, turn-level undo via the same snapshot stack as manual edits, provider errors mapped to human messages per §9). **Confirmed working end-to-end against the live API** — an AI-edited note exists on the test simulator, created via a real prompt. Also absorbed a full design pass beyond the original M3 scope: light/dark/system theming with an orange accent (`src/theme/`, persisted via AsyncStorage), vector icons (`@expo/vector-icons`) replacing text/emoji glyphs throughout, and the FAB composer's current interaction (Redo/Undo stacked above the main FAB; the FAB itself morphs into the send button — arrow when there's text, close when empty — when the composer is open).
 
 **M4 — Change highlighting.** Diff and tint. Last because it is pure polish and touches the editor's internals. Not started.
 
-**M5 — Harden.** Full error matrix, model-compatibility passes across a spread of OpenRouter models, physical-device testing, large-note behavior, store assets and review prep. Not started.
+**M5 — Harden.** Full error matrix, model-compatibility passes across a spread of OpenRouter models, physical-device testing, large-note behavior, store assets and review prep. Not started. Note physical-device validation is now the main open item here — simulator behavior is confirmed, real hardware (especially RN's historically fragile fetch-streaming) is not.
 
 ---
 
@@ -480,7 +480,7 @@ Every case needs a message a non-technical user can act on.
 
 - **Model quality variance** is the top product risk. A user on a weak free model will experience the app as broken. Mitigations: force `rewrite_note` on small notes, a curated model list, clear error messages. Consider a first-run compatibility check.
 - **Cost surprise.** Whole-note rewrites on long notes burn output tokens. Consider surfacing per-turn token usage from the OpenRouter response.
-- **Streaming on RN** has historically been fragile. Validate `expo/fetch` streaming on physical iOS and Android hardware in M2, not in M5.
+- **Streaming on RN** has historically been fragile. Confirmed working on an iOS **simulator** (§11 M3) — physical iOS and Android hardware still untested, and simulators don't always reproduce real-device fetch/streaming issues. Do this before M5, not during it.
 - **App Store review.** BYO-key AI apps are permitted, but reviewers sometimes ask about unmoderated content. Expect one round of questions.
 - **RN runtime gaps surface late, not at build time.** Getting M1 running on an iOS simulator surfaced three separate issues that a clean `tsc`/web-bundle check did not catch: `ulid` needs a `crypto.getRandomValues` polyfill Hermes doesn't provide (`react-native-get-random-values`), `react-native-markdown-display`'s `markdown-it` dependency imports Node's `punycode` core module which doesn't exist in the RN runtime (fixed by installing the userland `punycode` package), and `expo-file-system`'s new `Directory`/`File` classes don't work on web at all despite compiling cleanly. Full details and fixes: `AGENTS.md` → "Environment gotchas." Lesson for future milestones: a compiling web bundle proves far less than an actual simulator run — budget for this class of surprise in M3/M4 too, not just M1.
 

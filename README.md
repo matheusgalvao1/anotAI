@@ -11,8 +11,8 @@ Full product spec: **[PRD.md](./PRD.md)**.
 Building in the milestone order described in the PRD, agent core first because it's where the real risk lives and it's far cheaper to get right without a UI attached.
 
 - [x] **M2 — Agent runtime, headless.** Loop, tools, provider interface, compaction. Pure TypeScript, tested in Jest with no simulator and no network. → [`src/agent/`](./src/agent)
-- [x] **M1 — Notes app, no AI.** List, editor (preview-toggle markdown), file storage, trash, undo. → [`src/notes/`](./src/notes), [`src/screens/`](./src/screens). **Confirmed running on an iOS simulator** (empty-state list screen renders correctly). Getting it running surfaced three real environment/compatibility fixes — see "Running on a device" below and AGENTS.md's "Environment gotchas" — all now fixed in the repo. Not yet manually tested beyond the initial screen (create/edit/delete/undo/swipe still need a human tapping through them).
-- [ ] **M3 — Wire it up.** Prompt bar, status line, soft-lock, turn-level undo, Settings.
+- [x] **M1 — Notes app, no AI.** List, editor, file storage, trash, undo. → [`src/notes/`](./src/notes), [`src/screens/`](./src/screens). Confirmed on an iOS simulator: create/edit/delete/swipe-to-delete-with-undo/manual undo-redo all manually tested and working.
+- [x] **M3 — Wire it up.** `runTurn()` is connected to a real editor: Settings screen (OpenRouter key + model, OS keychain, live validation), a FAB-driven prompt composer (soft-lock while a turn runs, turn-level undo, error messages mapped from the provider's error kinds). **Confirmed working end-to-end against the live API** — an actual AI-edited note exists on the test simulator. Also includes a full design pass beyond M3's original scope: light/dark/system theming with an orange accent (persisted, `src/theme/`), vector icons throughout, and the FAB composer's current design (Undo/Redo stacked above the FAB; the FAB itself becomes the send button when the composer is open).
 - [ ] **M4 — Change highlighting.** Diff-based highlight of the last agent turn.
 - [ ] **M5 — Harden.** Full error matrix, cross-model testing, physical-device validation, store prep.
 
@@ -44,16 +44,32 @@ src/agent/              agent core — plain TypeScript, no React/RN imports
 
 src/notes/               note storage + pure helpers, no AI
   noteRepository.ts      file-backed CRUD: list/create/read/write/delete/restore/purge
+  agentNoteStore.ts       adapts noteRepository to the agent's single-note NoteStore interface
   title.ts                derives title + preview from body (never stored)
   undoStack.ts            snapshot undo/redo, pushed at debounced save boundaries
   relativeTime.ts          list-row timestamp formatting
   *.test.ts               Jest suite for the pure pieces above
 
+src/settings/            OpenRouter credentials, dev/test-only .env aside
+  secureSettings.ts       API key + model, OS keychain (expo-secure-store)
+  validateApiKey.ts       one cheap request to confirm a key/model pair works
+
+src/theme/               light/dark/system theming, orange accent
+  palette.ts              light/dark color tokens
+  ThemeContext.tsx        provider + useTheme(), persists preference via AsyncStorage
+
 src/screens/             app UI
   NoteListScreen.tsx      flat list, swipe-to-delete + undo snackbar, create FAB
-  NoteEditorScreen.tsx    preview-toggle editor, debounced save, undo/redo
+  NoteEditorScreen.tsx    editor + wires runTurn(): soft-lock, turn-level undo, error mapping
+  AgentFab.tsx            floating Undo/Redo/Ask-AI cluster; FAB becomes the send button when open
+  SettingsScreen.tsx      API key/model, Appearance (Light/Dark/System), About
 
-App.tsx, app.json, index.ts   Expo app shell — plain component-state navigation (no router yet)
+src/app/                 Expo entry shell — plain component-state navigation (no router yet)
+  App.tsx                 root component, screen switch, ThemeProvider
+  index.ts                registerRootComponent; crypto polyfill must stay the first import
+  assets/                 app icons
+
+app.json, package.json        reference src/app/ paths directly (Expo/npm require these at repo root)
 PRD.md                        full product requirements and architecture doc
 ```
 
@@ -88,13 +104,13 @@ cp .env.example .env
 
 The agent core has zero dependency on React or React Native, specifically so it can be tested in Node with no simulator and no network — see PRD §11 and §12 for why this ordering matters. `src/agent/providers/mock.ts` provides a scripted `Provider` so loop behavior (tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback) is fully deterministic in tests.
 
-`npm test` never talks to a real model — it's all against the mock provider. `OpenRouterProvider` (streaming SSE, tool-call parsing) has not been validated against the live API and needs to be before it's trusted; do that with:
+`npm test` never talks to a real model — it's all against the mock provider. `OpenRouterProvider` (streaming SSE, tool-call parsing) **has** been validated against the live API, both via this script and via a real AI-edited note in the app on an iOS simulator:
 
 ```bash
 npm run test:live
 ```
 
-This runs one real turn against OpenRouter (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. Without `OPENROUTER_API_KEY`/`OPENROUTER_DEFAULT_MODEL` set in `.env`, it skips with instructions instead of failing. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident. It also still needs validation on physical iOS/Android hardware — RN's fetch-streaming support has historically been fragile, and this test only proves the adapter works in Node.
+This runs one real turn against OpenRouter (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. Without `OPENROUTER_API_KEY`/`OPENROUTER_DEFAULT_MODEL` set in `.env`, it skips with instructions instead of failing. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident. Still open: validation on **physical** iOS/Android hardware, not just simulator — RN's fetch-streaming support has historically been fragile on real devices in ways a simulator doesn't always reproduce.
 
 ## License
 

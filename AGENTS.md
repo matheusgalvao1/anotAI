@@ -15,6 +15,12 @@ Read both before making non-trivial changes — this file is operating conventio
 
 Read the exact versioned docs for the Expo SDK actually pinned in `package.json` (currently v57) at `https://docs.expo.dev/versions/v57.0.0/` before writing Expo/React Native code. Don't rely on training data for Expo APIs — they change across versions often enough that guessing is wrong more often than it's right.
 
+## The Expo entry shell lives in src/app/, not at the repo root
+
+`App.tsx`, `index.ts`, and `assets/` live under `src/app/` to keep the repo root down to config and docs. `package.json`'s `"main"` points at `src/app/index.ts`; `app.json`'s icon paths point at `src/app/assets/`. `app.json`, `package.json`, and the tsconfig/jest configs stay at the actual repo root — Expo CLI and npm only look for those there.
+
+**A directory literally named `app` anywhere in the tree — including nested, as `src/app/`— gets picked up by Expo's own tooling as a potential Expo Router root**, logged as `Using src/app as the root directory for Expo Router`. This is harmless as long as `expo-router` isn't a dependency and `"main"` still points explicitly at our own `index.ts` (both true today), but it's exactly the naming collision to watch for if `expo-router` ever gets adopted (PRD §10) — that transition would need to actually embrace this directory as a router root, or the folder would need renaming first.
+
 ## Architecture invariant: the agent core stays framework-free
 
 `src/agent/` must never import React, React Native, or Expo APIs. It's plain TypeScript, tested headless in Jest with no simulator and no network (see `src/agent/providers/mock.ts`). This is deliberate — it's what makes the hardest part of the app (the loop, tool-calling, compaction) fast to iterate on and cheap to test. If a change to `src/agent/` seems to need a React or RN import, that's a sign the abstraction boundary is being violated — push the platform-specific bit (file I/O, secure storage, fetch) behind an interface instead (see `NoteStore`, `Provider`).
@@ -34,7 +40,7 @@ npm run ios / android / web
 ## Environment gotchas (all found the hard way getting M1 running on an iOS simulator)
 
 - **Never locate this repo inside `~/Downloads`, `~/Desktop`, `~/Documents`, or iCloud Drive.** macOS requires the terminal app to have "Full Disk Access" (or Files & Folders access) to run FSEvents on those specific folders; without it, `watchman watch-project` fails with `FSEventStreamStart failed`, and Metro falls back to Node's `fs.watch`, which then dies with `EMFILE: too many open files, watch` on a tree this size. Keep the repo somewhere ordinary, e.g. `~/Developer/`.
-- **`react-native-get-random-values` must be the first import in `index.ts`**, before anything else. `ulid` (used by `src/notes/noteRepository.ts`) needs `crypto.getRandomValues`, which Hermes doesn't provide natively; the polyfill has to run before any module that might call `ulid()` is evaluated.
+- **`react-native-get-random-values` must be the first import in `src/app/index.ts`**, before anything else. `ulid` (used by `src/notes/noteRepository.ts`) needs `crypto.getRandomValues`, which Hermes doesn't provide natively; the polyfill has to run before any module that might call `ulid()` is evaluated.
 - **`punycode` is a real npm dependency here, not dead weight.** `react-native-markdown-display` → `markdown-it` does `require('punycode')` expecting Node's core module, which doesn't exist in the RN runtime. Installing the userland `punycode` package lets Metro resolve it instead of failing the whole iOS bundle. Don't remove it as "unused."
 - **`expo-file-system`'s `Directory`/`File` classes do not work on web** (`this.validatePath is not a function` at runtime) despite the bundle compiling cleanly — web is a dev convenience, not a target platform (PRD §1), so this is a known, accepted gap, not a bug to chase.
 - If `expo start --ios` prints `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` — that's Metro's own recovery routine (it just ran `watchman watch-del-all` for you) telling you, literally, to run the same command again. It usually works the second time.
