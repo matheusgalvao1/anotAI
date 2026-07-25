@@ -56,9 +56,26 @@ Other scripts: `npm run ios`, `npm run android`, `npm run web`, `npm run test:wa
 
 There's no UI yet (see Status above), so `npm test` is the meaningful command today.
 
+## Environment variables
+
+```bash
+cp .env.example .env
+# then fill in OPENROUTER_API_KEY and OPENROUTER_DEFAULT_MODEL
+```
+
+`.env` is gitignored and is a **dev/test-time convenience only** — it's read by `npm run test:live` (below), nothing else. The shipped app never reads API keys from env vars; a user's key is stored in the OS keychain at runtime, set via the in-app Settings screen (PRD §8). `.env.example` documents the naming convention (`<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`) so it extends cleanly as more providers land (PRD §14.1).
+
 ## Testing philosophy
 
-The agent core has zero dependency on React or React Native, specifically so it can be tested in Node with no simulator and no network — see PRD §11 and §12 for why this ordering matters. `src/agent/providers/mock.ts` provides a scripted `Provider` so loop behavior (tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback) is fully deterministic in tests. The real `OpenRouterProvider` still needs validation against the live API and on physical hardware before shipping — streaming behavior on React Native has historically been fragile.
+The agent core has zero dependency on React or React Native, specifically so it can be tested in Node with no simulator and no network — see PRD §11 and §12 for why this ordering matters. `src/agent/providers/mock.ts` provides a scripted `Provider` so loop behavior (tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback) is fully deterministic in tests.
+
+`npm test` never talks to a real model — it's all against the mock provider. `OpenRouterProvider` (streaming SSE, tool-call parsing) has not been validated against the live API and needs to be before it's trusted; do that with:
+
+```bash
+npm run test:live
+```
+
+This runs one real turn against OpenRouter (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. Without `OPENROUTER_API_KEY`/`OPENROUTER_DEFAULT_MODEL` set in `.env`, it skips with instructions instead of failing. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident. It also still needs validation on physical iOS/Android hardware — RN's fetch-streaming support has historically been fragile, and this test only proves the adapter works in Node.
 
 ## License
 

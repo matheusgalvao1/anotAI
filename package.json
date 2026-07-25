@@ -11,6 +11,7 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
+    "dotenv": "^17.4.2",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.12",
     "typescript": "~6.0.3"
@@ -21,7 +22,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:live": "jest --config jest.live.config.js"
   },
   "private": true
 }

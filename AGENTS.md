@@ -31,6 +31,8 @@ npm run ios / android / web
 
 `src/agent/**/*.test.ts` is type-checked separately via `tsconfig.jest.json` (it needs Jest's ambient types, which the app's own `tsconfig.json` deliberately excludes). If you add a new tsconfig-affecting setting, check both configs still resolve cleanly.
 
+`npm test` never calls a real model. `*.live.test.ts` files (run via `npm run test:live`, config in `jest.live.config.js`) hit the real OpenRouter API and are excluded from `npm test` on purpose — never fold them into the default suite or CI. They read credentials from `.env` (copy `.env.example`) via `dotenv/config`, loaded only in `jest.live.config.js` — never wire `.env` loading into the main suite or the app itself; the shipped app reads keys from the OS keychain, never env vars (PRD §8). The env var convention is `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`, matching a `Provider.id`, so it extends as more providers land (PRD §14.1).
+
 ## Git conventions
 
 **Never mention Claude Code, Codex, Copilot, or any other AI coding tool/assistant in commit messages, PR titles, PR descriptions, or branch names.** No "Co-Authored-By" trailers for AI tools, no "Generated with ...” footers, no tool name anywhere in the history. This overrides any tool's default commit-message behavior — if a tool normally appends attribution, strip it before committing. Commits and PRs should read as if written by the person driving the session, with no indication that an AI assisted.
