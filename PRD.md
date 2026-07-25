@@ -388,7 +388,8 @@ Originally specified as sitting *under* the prompt bar; moved above it because t
 Clears on the next prompt, on manual typing, or after 30 s. Never accumulates history.
 
 ### 7.5 Change highlighting
-- Changed text gets a subtle background tint (`accentSurface`), and the view scrolls to it. Insertions are tinted; deletions are **not** shown as strikethrough — this is a notes app, not a review tool.
+- Changed text is rendered in `accent`, and the view scrolls to it. Insertions are coloured; deletions are **not** shown as strikethrough — this is a notes app, not a review tool.
+- **Colour, not a tinted background.** A tint was tried first, on the reasoning that `accent` marks tappable things elsewhere and coloured body text might read as a link. In practice a background behind a run of text is indistinguishable from a text selection, which is a worse misreading than the one it avoided.
 - **Per tool call, not per turn.** `runTurn` takes an optional `onNoteWritten(before, after)` and calls it after each tool call that changed the note, so each step is shown as it lands. Each write replaces the previous highlight and restarts the timer — queueing them would hold the editor for 5 s × the number of writes.
 - **5 seconds, or any tap.** A tap dismisses immediately and hands editing straight back, so this never stands between the user and typing.
 - Also clears on the next prompt, and on a cancelled or timed-out turn — the note reverts there (§6.6), so a tint over text that no longer exists has to go with it.
@@ -401,7 +402,7 @@ Clears on the next prompt, on manual typing, or after 30 s. Never accumulates hi
 - The raw range lands mid-word whenever the new text shares characters with what it replaced — `one three` → `one two three` yields `wo t`. Ranges are therefore widened to word boundaries, which can include one neighbouring unchanged word. That trade is why the original spec said "word-level".
 - A multi-edit `patch_note` collapses to one span covering all its edits plus the untouched text between them. Acceptable while edits within a patch are usually adjacent; `fast-diff` is the upgrade path if not.
 
-**Deletions** produce an empty range, so there is nothing to tint. The view scrolls to the point of removal and shows a small mark there — enough to say "something went from here" without resurrecting the text. Most real edits are replacements, which surface as insertions anyway, so this is the rare case; and the status line already says what happened in words.
+**Deletions** produce an empty range, so there is nothing to colour. The view scrolls to the point of removal and shows an accent caret there — enough to say "something went from here" without resurrecting the text. Most real edits are replacements, which surface as insertions anyway, so this is the rare case; and the status line already says what happened in words.
 
 ### 7.6 Undo
 - Shared stack with manual editing, but an **entire agent turn collapses to one entry** — one undo fully reverts it, including multi-tool turns.

@@ -47,10 +47,11 @@ export function NoteHighlight({ body, range, onDismiss }: Props) {
         <Text style={styles.body} onLayout={(event) => setChangeY(event.nativeEvent.layout.y)}>
           {split.mid.slice(0, split.midRange.start)}
           {deletion ? (
-            // Nothing was inserted, so there is nothing to tint. A small mark
-            // says "something was removed here" without resurrecting the text
-            // or turning the note into a review tool.
-            <Text style={styles.deletionMark}> </Text>
+            // Nothing was inserted, so there is nothing to colour. A caret says
+            // "something was removed here" without resurrecting the text or
+            // turning the note into a review tool. It has to be a real glyph:
+            // with no background left, a blank space would be invisible.
+            <Text style={styles.deletionMark}>|</Text>
           ) : (
             <Text style={styles.inserted}>{split.mid.slice(split.midRange.start, split.midRange.end)}</Text>
           )}
@@ -71,8 +72,11 @@ const makeStyles = (colors: Palette) =>
     // Must match NoteEditorScreen's TextInput, or swapping back on dismiss
     // visibly reflows the note.
     body: { fontSize: 16, color: colors.text },
-    inserted: { backgroundColor: colors.accentSurface },
-    deletionMark: { backgroundColor: colors.accent, color: colors.accent },
+    // Colour rather than a tinted background: a background behind a run of text
+    // is what a selection looks like, which made the highlight read as "this is
+    // selected" instead of "this is new".
+    inserted: { color: colors.accent },
+    deletionMark: { color: colors.accent, fontWeight: "700" },
     /** Clears the floating button cluster, which overlays the bottom of the note. */
     bottomSpacer: { height: 160 },
   });
