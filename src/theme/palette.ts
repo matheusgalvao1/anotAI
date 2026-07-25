@@ -8,6 +8,8 @@ export type Palette = {
   accent: string;
   accentText: string;
   danger: string;
+  /** Tinted background behind a danger message, so a save failure reads as an alert rather than body text. */
+  dangerSurface: string;
   success: string;
 };
 
@@ -23,6 +25,7 @@ export const lightPalette: Palette = {
   accent: "#F97316",
   accentText: "#FFFFFF",
   danger: "#DC2626",
+  dangerSurface: "#FEF2F2",
   success: "#16A34A",
 };
 
@@ -36,5 +39,6 @@ export const darkPalette: Palette = {
   accent: "#FB923C",
   accentText: "#111827",
   danger: "#F87171",
+  dangerSurface: "#3B1D1D",
   success: "#4ADE80",
 };
