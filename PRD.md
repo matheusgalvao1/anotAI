@@ -413,8 +413,11 @@ Clears on the next prompt, on manual typing, or after 30 s. Never accumulates hi
 - **Appearance** — Light / Dark / System.
 - **Providers** — add a provider from a picker; adding one reveals its masked, paste-friendly key field. Any number can be configured at once. Removing one deletes its key, and clears the model selection if that model was served by it — a selection whose provider is gone cannot run.
 - **Model** — a single picker across every configured provider, **grouped by provider and alphabetical within each group**. No typing in the normal case.
-- **Save** — one button. It stores the keys and selection, then validates the selected pair as a matter of course. Save and Validate as separate buttons was a two-step nobody expected.
-- **About** — version, notes-directory path, and a plain-language privacy statement.
+- **No Save button.** Keys persist on a 500 ms debounce, matching the editor's own, and are flushed when the screen closes so a key typed in the last half-second isn't lost. The model selection persists the moment it's picked.
+- **Validate** — an icon button in the key row, beside reveal and paste. Needs a model chosen for that provider, since a key can only be checked against a model.
+- **No About section, and no explanatory copy in the sections.** Status messages stay (validation result, "showing the last known list"); static explanation does not.
+
+> **Open gap:** removing About and the section hints removed the app's only privacy statements — that keys live in the OS keychain and that notes never leave the device. §8 still requires the guarantee; nothing in the UI now states it. Wants a home, most likely on a first-run screen or in the list's empty state.
 
 **Only tool-calling models are listed.** The agent cannot function without tool support, so offering the rest is offering a choice that is already broken. OpenRouter reports this in `supported_parameters`.
 

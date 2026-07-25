@@ -1,5 +1,5 @@
 import * as Clipboard from "expo-clipboard";
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { loadModels } from "../settings/modelCatalogue";
@@ -8,6 +8,7 @@ import { ModelSelection } from "../settings/modelSelection";
 import { describeProvider, PROVIDERS, ProviderId } from "../settings/providers";
 import {
   clearProviderKey,
+  clearSelectedModel,
   getConfiguredProviderIds,
   getProviderKey,
   getSelectedModel,
@@ -19,6 +20,9 @@ import { Icon, IconName } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { ThemePreference, useTheme } from "../theme/ThemeContext";
 import { PickerModal, PickerSection } from "./PickerModal";
+
+/** Matches the editor's own debounce, so "saving" feels the same everywhere. */
+const SAVE_DEBOUNCE_MS = 500;
 
 const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: IconName }[] = [
   { value: "light", label: "Light", icon: "light" },
@@ -48,12 +52,7 @@ function Section({ icon, title, children }: { icon: IconName; title: string; chi
   );
 }
 
-type SaveState =
-  | { kind: "idle" }
-  | { kind: "saved" }
-  | { kind: "validating" }
-  | { kind: "valid" }
-  | { kind: "invalid"; message: string };
+type Feedback = { kind: "ok" | "error"; message: string } | null;
 
 export function SettingsScreen({ onBack }: Props) {
   const { colors, preference, setPreference } = useTheme();
@@ -63,7 +62,8 @@ export function SettingsScreen({ onBack }: Props) {
   const [keys, setKeys] = useState<Partial<Record<ProviderId, string>>>({});
   const [revealed, setRevealed] = useState<Partial<Record<ProviderId, boolean>>>({});
   const [selection, setSelection] = useState<ModelSelection | null>(null);
-  const [status, setStatus] = useState<SaveState>({ kind: "idle" });
+  const [validating, setValidating] = useState<ProviderId | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>(null);
 
   const [models, setModels] = useState<CatalogueModel[]>([]);
   const [catalogueError, setCatalogueError] = useState<string | null>(null);
@@ -74,11 +74,13 @@ export function SettingsScreen({ onBack }: Props) {
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Read by the unmount flush, which must not re-bind on every keystroke. */
+  const keysRef = useRef(keys);
+  keysRef.current = keys;
+
   const addedProviders = useMemo(() => Object.keys(keys) as ProviderId[], [keys]);
-  const unaddedProviders = useMemo(
-    () => PROVIDERS.filter((provider) => !(provider.id in keys)),
-    [keys],
-  );
+  const unaddedProviders = useMemo(() => PROVIDERS.filter((provider) => !(provider.id in keys)), [keys]);
 
   useEffect(() => {
     (async () => {
@@ -95,28 +97,63 @@ export function SettingsScreen({ onBack }: Props) {
     })();
   }, []);
 
-  const refreshModels = useCallback(async (providerIds: ProviderId[], currentKeys: Partial<Record<ProviderId, string>>) => {
-    if (providerIds.length === 0) {
-      setModels([]);
-      setCatalogueError(null);
-      setCatalogueStale(false);
-      return;
-    }
-    setLoadingModels(true);
-    const results = await Promise.all(
-      providerIds.map((id) => loadModels(id, currentKeys[id]?.trim() || null)),
+  const persistKeys = useCallback(async (next: Partial<Record<ProviderId, string>>) => {
+    await Promise.all(
+      (Object.keys(next) as ProviderId[]).map((id) => setProviderKey(id, (next[id] ?? "").trim())),
     );
-    setModels(results.flatMap((result) => result.models));
-    setCatalogueStale(results.some((result) => result.stale));
-    const firstError = results.find((result) => result.error !== null)?.error ?? null;
-    setCatalogueError(results.every((result) => result.models.length === 0) ? firstError : null);
-    setLoadingModels(false);
   }, []);
+
+  /** There is no Save button, so every edit schedules its own write. */
+  const editKey = useCallback(
+    (providerId: ProviderId, text: string) => {
+      setFeedback(null);
+      setKeys((current) => {
+        const next = { ...current, [providerId]: text };
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          saveTimer.current = null;
+          void persistKeys(next);
+        }, SAVE_DEBOUNCE_MS);
+        return next;
+      });
+    },
+    [persistKeys],
+  );
+
+  // Leaving the screen must not drop a key typed in the last half-second.
+  useEffect(
+    () => () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        void persistKeys(keysRef.current);
+      }
+    },
+    [persistKeys],
+  );
+
+  const refreshModels = useCallback(
+    async (providerIds: ProviderId[], currentKeys: Partial<Record<ProviderId, string>>) => {
+      if (providerIds.length === 0) {
+        setModels([]);
+        setCatalogueError(null);
+        setCatalogueStale(false);
+        return;
+      }
+      setLoadingModels(true);
+      const results = await Promise.all(providerIds.map((id) => loadModels(id, currentKeys[id]?.trim() || null)));
+      setModels(results.flatMap((result) => result.models));
+      setCatalogueStale(results.some((result) => result.stale));
+      const firstError = results.find((result) => result.error !== null)?.error ?? null;
+      setCatalogueError(results.every((result) => result.models.length === 0) ? firstError : null);
+      setLoadingModels(false);
+    },
+    [],
+  );
 
   // Reloaded whenever the set of added providers changes: the list is the union
   // across them, so adding or removing one changes what should be on offer.
   useEffect(() => {
-    void refreshModels(addedProviders, keys);
+    void refreshModels(addedProviders, keysRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keys are read, not tracked; a keystroke must not refetch
   }, [addedProviders.join(","), refreshModels]);
 
@@ -130,8 +167,8 @@ export function SettingsScreen({ onBack }: Props) {
   );
 
   const handleAddProvider = (providerId: ProviderId) => {
+    setFeedback(null);
     setKeys((current) => ({ ...current, [providerId]: "" }));
-    setStatus({ kind: "idle" });
   };
 
   const handleRemoveProvider = async (providerId: ProviderId) => {
@@ -142,8 +179,11 @@ export function SettingsScreen({ onBack }: Props) {
       return next;
     });
     // A selection served by a provider that's gone can't run, so it goes too.
-    if (selection?.providerId === providerId) setSelection(null);
-    setStatus({ kind: "idle" });
+    if (selection?.providerId === providerId) {
+      await clearSelectedModel();
+      setSelection(null);
+    }
+    setFeedback(null);
   };
 
   const handlePaste = async (providerId: ProviderId) => {
@@ -152,38 +192,40 @@ export function SettingsScreen({ onBack }: Props) {
       // Silence here is indistinguishable from a broken button. On the
       // simulator an empty clipboard usually means the host pasteboard never
       // synced across (see README), not that nothing was copied.
-      setStatus({ kind: "invalid", message: "Clipboard is empty — nothing to paste." });
+      setFeedback({ kind: "error", message: "Clipboard is empty — nothing to paste." });
       return;
     }
-    setKeys((current) => ({ ...current, [providerId]: text }));
-    setStatus({ kind: "idle" });
+    editKey(providerId, text);
   };
 
-  /** Saving validates as a matter of course — two buttons for one intention was a step nobody expected. */
-  const handleSave = async () => {
-    await Promise.all(
-      addedProviders.map((id) => setProviderKey(id, (keys[id] ?? "").trim())),
-    );
-    if (selection) await setSelectedModel(selection);
-    setStatus({ kind: "saved" });
-
-    if (!selection) return;
-    const key = (keys[selection.providerId] ?? "").trim();
+  const handleValidate = async (providerId: ProviderId) => {
+    const key = (keys[providerId] ?? "").trim();
     if (!key) {
-      setStatus({ kind: "invalid", message: `Add a key for ${describeProvider(selection.providerId).label} first.` });
+      setFeedback({ kind: "error", message: "Enter a key first." });
+      return;
+    }
+    if (!selection || selection.providerId !== providerId) {
+      setFeedback({ kind: "error", message: `Choose a ${describeProvider(providerId).label} model first.` });
       return;
     }
 
-    setStatus({ kind: "validating" });
+    // Validating uses the key in the field, which may not have been written yet.
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      await persistKeys(keys);
+    }
+
+    setValidating(providerId);
     const result = await validateApiKey(key, selection.modelId);
-    setStatus(result.ok ? { kind: "valid" } : { kind: "invalid", message: result.message });
+    setValidating(null);
+    setFeedback(result.ok ? { kind: "ok", message: "Key and model work." } : { kind: "error", message: result.message });
     if (result.ok) void refreshModels(addedProviders, keys);
   };
 
   const selectedLabel = useMemo(() => {
     if (!selection) return null;
-    const found = models.find((model) => model.id === selection.modelId);
-    return found ? found.name : selection.modelId;
+    return models.find((model) => model.id === selection.modelId)?.name ?? selection.modelId;
   }, [selection, models]);
 
   return (
@@ -225,46 +267,51 @@ export function SettingsScreen({ onBack }: Props) {
         </Section>
 
         <Section icon="key" title="Providers">
-          {addedProviders.length === 0 && (
-            <Text style={styles.hint}>Add a provider to enable AI editing. Nothing is sent anywhere until you do.</Text>
-          )}
-
-          {addedProviders.map((providerId) => {
-            const provider = describeProvider(providerId);
-            return (
-              <View key={providerId} style={styles.providerBlock}>
-                <View style={styles.providerHeader}>
-                  <Text style={styles.providerName}>{provider.label}</Text>
-                  <Pressable onPress={() => void handleRemoveProvider(providerId)} hitSlop={8}>
-                    <Icon name="delete" size={17} color={colors.danger} />
-                  </Pressable>
-                </View>
-                <View style={styles.inputRow}>
-                  <TextInput
-                    value={keys[providerId] ?? ""}
-                    onChangeText={(text) => setKeys((current) => ({ ...current, [providerId]: text }))}
-                    placeholder={provider.keyPlaceholder}
-                    placeholderTextColor={colors.textMuted}
-                    secureTextEntry={!revealed[providerId]}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    style={[styles.input, styles.inputFlex]}
-                  />
-                  <Pressable
-                    onPress={() => setRevealed((current) => ({ ...current, [providerId]: !current[providerId] }))}
-                    hitSlop={8}
-                    style={styles.inputIconButton}
-                  >
-                    <Icon name={revealed[providerId] ? "conceal" : "reveal"} size={19} color={colors.textSecondary} />
-                  </Pressable>
-                  <Pressable onPress={() => void handlePaste(providerId)} hitSlop={8} style={styles.inputIconButton}>
-                    <Icon name="clipboard" size={19} color={colors.textSecondary} />
-                  </Pressable>
-                </View>
-                <Text style={styles.hint}>{provider.keyHint}</Text>
+          {addedProviders.map((providerId) => (
+            <View key={providerId} style={styles.providerBlock}>
+              <View style={styles.providerHeader}>
+                <Text style={styles.providerName}>{describeProvider(providerId).label}</Text>
+                <Pressable onPress={() => void handleRemoveProvider(providerId)} hitSlop={8}>
+                  <Icon name="delete" size={17} color={colors.danger} />
+                </Pressable>
               </View>
-            );
-          })}
+              <View style={styles.inputRow}>
+                <TextInput
+                  value={keys[providerId] ?? ""}
+                  onChangeText={(text) => editKey(providerId, text)}
+                  placeholder={describeProvider(providerId).keyPlaceholder}
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry={!revealed[providerId]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[styles.input, styles.inputFlex]}
+                />
+                <Pressable
+                  onPress={() => setRevealed((current) => ({ ...current, [providerId]: !current[providerId] }))}
+                  hitSlop={8}
+                  style={styles.inputIconButton}
+                >
+                  <Icon name={revealed[providerId] ? "conceal" : "reveal"} size={19} color={colors.textSecondary} />
+                </Pressable>
+                <Pressable onPress={() => void handlePaste(providerId)} hitSlop={8} style={styles.inputIconButton}>
+                  <Icon name="clipboard" size={19} color={colors.textSecondary} />
+                </Pressable>
+                <Pressable
+                  onPress={() => void handleValidate(providerId)}
+                  hitSlop={8}
+                  style={styles.inputIconButton}
+                  disabled={validating !== null}
+                  accessibilityLabel="Check this key and model"
+                >
+                  {validating === providerId ? (
+                    <ActivityIndicator size="small" color={colors.textSecondary} />
+                  ) : (
+                    <Icon name="validate" size={19} color={colors.textSecondary} />
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ))}
 
           {unaddedProviders.length > 0 && (
             <Pressable style={styles.addRow} onPress={() => setProviderPickerOpen(true)}>
@@ -273,7 +320,9 @@ export function SettingsScreen({ onBack }: Props) {
             </Pressable>
           )}
 
-          <Text style={styles.hint}>Keys are stored in this device's secure keychain, and only sent to their own provider.</Text>
+          {feedback && (
+            <Text style={feedback.kind === "ok" ? styles.successText : styles.errorText}>{feedback.message}</Text>
+          )}
         </Section>
 
         <Section icon="model" title="Model">
@@ -292,11 +341,8 @@ export function SettingsScreen({ onBack }: Props) {
             )}
           </Pressable>
 
-          {selection && selectedLabel !== selection.modelId && (
-            <Text style={styles.hint}>{selection.modelId}</Text>
-          )}
-
-          {catalogueStale && <Text style={styles.hint}>Showing the last known list — the provider couldn't be reached.</Text>}
+          {/* State, not explanation: the list on screen may be out of date. */}
+          {catalogueStale && <Text style={styles.noticeText}>Showing the last known list — the provider couldn't be reached.</Text>}
 
           {catalogueError && (
             <View style={styles.fallbackBlock}>
@@ -306,10 +352,13 @@ export function SettingsScreen({ onBack }: Props) {
               <TextInput
                 value={manualModel}
                 onChangeText={setManualModel}
-                onEndEditing={() =>
-                  manualModel.trim() &&
-                  setSelection({ providerId: addedProviders[0] ?? "openrouter", modelId: manualModel.trim() })
-                }
+                onEndEditing={() => {
+                  const modelId = manualModel.trim();
+                  if (!modelId) return;
+                  const next = { providerId: addedProviders[0] ?? "openrouter", modelId };
+                  setSelection(next);
+                  void setSelectedModel(next);
+                }}
                 placeholder="Or type a model id, e.g. openai/gpt-4o-mini"
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
@@ -318,26 +367,6 @@ export function SettingsScreen({ onBack }: Props) {
               />
             </View>
           )}
-
-          <Text style={styles.hint}>Only models that support tool calling are listed — the agent can't work without it.</Text>
-        </Section>
-
-        <View style={styles.saveRow}>
-          <Pressable onPress={() => void handleSave()} style={[styles.button, styles.primaryButton]}>
-            <Icon name="save" size={15} color={colors.accentText} />
-            <Text style={styles.primaryButtonText}>{status.kind === "validating" ? "Checking…" : "Save"}</Text>
-          </Pressable>
-        </View>
-
-        {status.kind === "saved" && <Text style={styles.successText}>Saved.</Text>}
-        {status.kind === "valid" && <Text style={styles.successText}>✓ Saved — key and model work.</Text>}
-        {status.kind === "invalid" && <Text style={styles.errorText}>{status.message}</Text>}
-
-        <Section icon="about" title="About">
-          <Text style={styles.aboutText}>
-            anotAI — notes are markdown files stored only on this device. In this mode, nothing you write ever leaves
-            the device except the text sent to your provider when you ask the AI to edit a note.
-          </Text>
         </Section>
       </ScrollView>
 
@@ -358,8 +387,10 @@ export function SettingsScreen({ onBack }: Props) {
         sections={modelSections}
         onSelect={(modelId) => {
           const found = models.find((model) => model.id === modelId);
-          setSelection({ providerId: found?.providerId ?? addedProviders[0] ?? "openrouter", modelId });
-          setStatus({ kind: "idle" });
+          const next = { providerId: found?.providerId ?? addedProviders[0] ?? "openrouter", modelId };
+          setSelection(next);
+          void setSelectedModel(next);
+          setFeedback(null);
         }}
         onClose={() => setModelPickerOpen(false)}
         emptyMessage={loadingModels ? "Loading models…" : "No tool-calling models available."}
@@ -407,10 +438,10 @@ const makeStyles = (colors: Palette) =>
     },
     appearanceOptionSelected: { borderColor: colors.accent, borderWidth: 1.5 },
     appearanceLabel: { fontSize: 12, fontWeight: "600", color: colors.textSecondary },
-    providerBlock: { gap: 8, paddingBottom: 4 },
+    providerBlock: { gap: 8 },
     providerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     providerName: { fontSize: 14, fontWeight: "600", color: colors.text },
-    inputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    inputRow: { flexDirection: "row", alignItems: "center", gap: 6 },
     inputFlex: { flex: 1 },
     inputIconButton: { padding: 4 },
     input: {
@@ -441,22 +472,7 @@ const makeStyles = (colors: Palette) =>
     selectValue: { flex: 1, fontSize: 15, color: colors.text },
     selectPlaceholder: { flex: 1, fontSize: 15, color: colors.textMuted },
     fallbackBlock: { gap: 8 },
-    hint: { fontSize: 12, color: colors.textMuted },
-    saveRow: { flexDirection: "row" },
-    button: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      paddingHorizontal: 18,
-      paddingVertical: 11,
-      borderRadius: 8,
-      backgroundColor: colors.background,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-    },
-    primaryButton: { backgroundColor: colors.accent, borderColor: colors.accent },
-    primaryButtonText: { color: colors.accentText, fontWeight: "700" },
-    successText: { color: colors.success },
-    errorText: { color: colors.danger },
-    aboutText: { fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
+    noticeText: { fontSize: 12, color: colors.textMuted },
+    successText: { color: colors.success, fontSize: 13 },
+    errorText: { color: colors.danger, fontSize: 13 },
   });
