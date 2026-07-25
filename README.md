@@ -11,12 +11,14 @@ Full product spec: **[PRD.md](./PRD.md)**.
 Building in the milestone order described in the PRD, agent core first because it's where the real risk lives and it's far cheaper to get right without a UI attached.
 
 - [x] **M2 — Agent runtime, headless.** Loop, tools, provider interface, compaction. Pure TypeScript, tested in Jest with no simulator and no network. → [`src/agent/`](./src/agent)
-- [ ] **M1 — Notes app, no AI.** List, editor, file storage, undo.
+- [x] **M1 — Notes app, no AI.** List, editor (preview-toggle markdown), file storage, trash, undo. → [`src/notes/`](./src/notes), [`src/screens/`](./src/screens). **Confirmed running on an iOS simulator** (empty-state list screen renders correctly). Getting it running surfaced three real environment/compatibility fixes — see "Running on a device" below and AGENTS.md's "Environment gotchas" — all now fixed in the repo. Not yet manually tested beyond the initial screen (create/edit/delete/undo/swipe still need a human tapping through them).
 - [ ] **M3 — Wire it up.** Prompt bar, status line, soft-lock, turn-level undo, Settings.
 - [ ] **M4 — Change highlighting.** Diff-based highlight of the last agent turn.
 - [ ] **M5 — Harden.** Full error matrix, cross-model testing, physical-device validation, store prep.
 
 (M2 before M1 is deliberate — see PRD §11.)
+
+**Editor decision:** M1 uses a plain `TextInput` + a toggled markdown preview, not live inline formatting. Three candidates were spiked and compared — see PRD §7.2 and §12. Live inline formatting (à la `react-native-live-markdown`) is the confirmed target for a later polish pass, pending a dev-client build to validate it on real iOS/Android (it doesn't run in Expo Go).
 
 ## Stack
 
@@ -40,7 +42,18 @@ src/agent/              agent core — plain TypeScript, no React/RN imports
     openrouter.ts          real adapter — streaming SSE, OpenAI-shaped wire format
   *.test.ts               Jest suite for the above
 
-App.tsx, app.json, index.ts   Expo app shell (UI not yet built — see Status)
+src/notes/               note storage + pure helpers, no AI
+  noteRepository.ts      file-backed CRUD: list/create/read/write/delete/restore/purge
+  title.ts                derives title + preview from body (never stored)
+  undoStack.ts            snapshot undo/redo, pushed at debounced save boundaries
+  relativeTime.ts          list-row timestamp formatting
+  *.test.ts               Jest suite for the pure pieces above
+
+src/screens/             app UI
+  NoteListScreen.tsx      flat list, swipe-to-delete + undo snackbar, create FAB
+  NoteEditorScreen.tsx    preview-toggle editor, debounced save, undo/redo
+
+App.tsx, app.json, index.ts   Expo app shell — plain component-state navigation (no router yet)
 PRD.md                        full product requirements and architecture doc
 ```
 
@@ -48,13 +61,19 @@ PRD.md                        full product requirements and architecture doc
 
 ```bash
 npm install
-npm test          # agent core test suite (fast, no simulator)
-npm start         # Expo dev server — once the UI exists
+npm test          # unit tests: agent core + notes logic (fast, no simulator)
+npm run ios       # or: npm run android / npm run web
 ```
 
-Other scripts: `npm run ios`, `npm run android`, `npm run web`, `npm run test:watch`.
+Other scripts: `npm run test:watch`.
 
-There's no UI yet (see Status above), so `npm test` is the meaningful command today.
+### Running on a device
+
+**Keep this repo out of `~/Downloads`, `~/Desktop`, `~/Documents`, and iCloud Drive.** macOS gates FSEvents (what Watchman/Metro use for file-watching) behind a "Full Disk Access" permission for those specific folders; without it, Metro dies with `EMFILE: too many open files, watch` and no clear reason why. Clone/keep this somewhere ordinary, e.g. `~/Developer/anotai`.
+
+If you ever see `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` — that's not really an error, it's Metro's own recovery routine telling you to literally run the command again. It usually works the second time.
+
+See `AGENTS.md`'s "Environment gotchas" section for the full list of environment-specific fixes already applied (crypto polyfill, a Node-core-module shim) — you shouldn't need to redo any of them, they're already in the repo.
 
 ## Environment variables
 

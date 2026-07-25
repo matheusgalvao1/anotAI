@@ -31,6 +31,14 @@ npm run ios / android / web
 
 `src/agent/**/*.test.ts` is type-checked separately via `tsconfig.jest.json` (it needs Jest's ambient types, which the app's own `tsconfig.json` deliberately excludes). If you add a new tsconfig-affecting setting, check both configs still resolve cleanly.
 
+## Environment gotchas (all found the hard way getting M1 running on an iOS simulator)
+
+- **Never locate this repo inside `~/Downloads`, `~/Desktop`, `~/Documents`, or iCloud Drive.** macOS requires the terminal app to have "Full Disk Access" (or Files & Folders access) to run FSEvents on those specific folders; without it, `watchman watch-project` fails with `FSEventStreamStart failed`, and Metro falls back to Node's `fs.watch`, which then dies with `EMFILE: too many open files, watch` on a tree this size. Keep the repo somewhere ordinary, e.g. `~/Developer/`.
+- **`react-native-get-random-values` must be the first import in `index.ts`**, before anything else. `ulid` (used by `src/notes/noteRepository.ts`) needs `crypto.getRandomValues`, which Hermes doesn't provide natively; the polyfill has to run before any module that might call `ulid()` is evaluated.
+- **`punycode` is a real npm dependency here, not dead weight.** `react-native-markdown-display` → `markdown-it` does `require('punycode')` expecting Node's core module, which doesn't exist in the RN runtime. Installing the userland `punycode` package lets Metro resolve it instead of failing the whole iOS bundle. Don't remove it as "unused."
+- **`expo-file-system`'s `Directory`/`File` classes do not work on web** (`this.validatePath is not a function` at runtime) despite the bundle compiling cleanly — web is a dev convenience, not a target platform (PRD §1), so this is a known, accepted gap, not a bug to chase.
+- If `expo start --ios` prints `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` — that's Metro's own recovery routine (it just ran `watchman watch-del-all` for you) telling you, literally, to run the same command again. It usually works the second time.
+
 `npm test` never calls a real model. `*.live.test.ts` files (run via `npm run test:live`, config in `jest.live.config.js`) hit the real OpenRouter API and are excluded from `npm test` on purpose — never fold them into the default suite or CI. They read credentials from `.env` (copy `.env.example`) via `dotenv/config`, loaded only in `jest.live.config.js` — never wire `.env` loading into the main suite or the app itself; the shipped app reads keys from the OS keychain, never env vars (PRD §8). The env var convention is `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`, matching a `Provider.id`, so it extends as more providers land (PRD §14.1).
 
 ## Git conventions

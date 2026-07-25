@@ -346,8 +346,18 @@ Secondary benefit, realized immediately: M2 tests run against a scripted mock pr
 - Gear icon → Settings.
 
 ### 7.2 Editor
-- Markdown with **live rich rendering** — headings, bold/italic, lists, checkboxes, code, quotes render as the user types. No mode toggle, no split pane.
-- Checkboxes are tappable.
+
+**Decision (post-spike):** M1 ships a plain `TextInput` + a rendered preview, toggled — not live rich rendering. Three candidates were spiked (throwaway code, since deleted):
+
+| Candidate | Verdict |
+|---|---|
+| `@10play/tentap-editor` (WebView, TipTap/ProseMirror) | **Disqualified.** Its content model is HTML/ProseMirror-JSON — there is no `getMarkdown()`/`setMarkdown()` anywhere in its API, only `getHTML()`/`getJSON()`/`getText()`. Notes are markdown files and every agent tool operates on the literal markdown text, so this editor would require a bidirectional markdown⇄HTML conversion layer running on every load, save, and agent turn — a second document model, not a styling choice, and a source of drift against `patch_note`'s exact-match logic. Also failed to render on Expo web without additional undocumented setup, independent of the above.
+| `@expensify/react-native-live-markdown` | Architecturally the best fit — it's a drop-in `TextInput` replacement where `value`/`onChangeText` *is* the raw markdown string, styled live via a parser, no conversion layer. Cost: native code, New-Architecture-only, and its README states Expo Go is unsupported — a dev client build is required to validate it on the actual target platform (mobile), which hasn't happened yet. Rendered fine on Expo web, which is a positive but not conclusive signal.
+| `react-native-markdown-display` + toggle | **Chosen for M1.** Plain JS/RN-component rendering, no native module, works in Expo Go and on web today with zero extra setup. Same "value is the raw markdown string" property as live-markdown, minus the live inline formatting.
+
+**Confirmed end goal:** live inline formatting (the `react-native-live-markdown` style) is still the target UX, deferred to a v1.1 polish pass once a dev-client build pipeline exists (needed for other native modules eventually anyway) and it's been validated on real iOS/Android, not just web. Swapping the editor component later is a contained change — nothing else in the app depends on which widget renders the text.
+
+- Checkboxes are tappable — deferred past M1; needs a custom preview renderer override, not blocking the initial ship.
 - Standard native selection, undo/redo, and keyboard handling.
 - No title field. The first line *is* the title.
 
@@ -430,13 +440,13 @@ Every case needs a message a non-technical user can act on.
 | Layer | Choice | Note |
 |---|---|---|
 | Framework | **Expo** (managed) + React Native, TypeScript strict | Both platforms, one codebase. |
-| Navigation | `expo-router` | Two screens plus settings. |
+| Navigation | Plain component state (list ↔ editor) | Two screens don't justify `expo-router` yet; adopt it when screen count grows (e.g. Settings in M3). |
 | Files | `expo-file-system` | Notes as `.md`. |
 | Secure storage | `expo-secure-store` | API key only. |
 | HTTP / streaming | `expo/fetch` | Streaming SSE support; RN's default `fetch` does not stream. **Validate on a physical device early.** |
-| Markdown editor | **Open risk — see §12** | Live rich rendering on RN is the hardest UI dependency in the project. |
+| Markdown editor | `TextInput` + `react-native-markdown-display`, toggled | Decided post-spike — see §7.2. Live inline formatting deferred to v1.1. Requires the `punycode` npm package as a real dependency (not unused) — `markdown-it`, its transitive dependency, imports Node's `punycode` core module, absent from the RN runtime. |
 | Diff | `fast-diff` or `diff-match-patch` | Word-level, for highlighting. |
-| IDs | `ulid` | Sortable, collision-free. |
+| IDs | `ulid` | Sortable, collision-free. Requires `react-native-get-random-values` imported first in `index.ts` — Hermes has no native `crypto.getRandomValues`. |
 | State | Zustand or Context | Small surface; no Redux. |
 | Testing | Jest for the agent runtime | Runtime is React-free, so tests need no simulator. |
 
@@ -462,7 +472,7 @@ Every case needs a message a non-technical user can act on.
 
 **Needs a decision**
 
-1. **Markdown editor** — the single biggest unknown. Live rich rendering on React Native has no obvious winner. Options: `@10play/tentap-editor` (WebView-based, most capable, adds a WebView), a `react-native-markdown-display` preview + plain input hybrid, or building on a raw `TextInput` with decoration. **Recommendation: spike all three in M1 before committing.** If none is good enough, falling back to a preview toggle is an acceptable v1 compromise.
+1. ~~**Markdown editor**~~ **Decided** — see §7.2. Preview-toggle for M1; live inline formatting deferred to v1.1 pending dev-client validation.
 2. **Curated model list** — which models to recommend, and how to keep it from going stale without a backend.
 3. **Onboarding** — does the app explain the OpenRouter key requirement up front, or stay silent until AI is first used?
 
@@ -472,6 +482,7 @@ Every case needs a message a non-technical user can act on.
 - **Cost surprise.** Whole-note rewrites on long notes burn output tokens. Consider surfacing per-turn token usage from the OpenRouter response.
 - **Streaming on RN** has historically been fragile. Validate `expo/fetch` streaming on physical iOS and Android hardware in M2, not in M5.
 - **App Store review.** BYO-key AI apps are permitted, but reviewers sometimes ask about unmoderated content. Expect one round of questions.
+- **RN runtime gaps surface late, not at build time.** Getting M1 running on an iOS simulator surfaced three separate issues that a clean `tsc`/web-bundle check did not catch: `ulid` needs a `crypto.getRandomValues` polyfill Hermes doesn't provide (`react-native-get-random-values`), `react-native-markdown-display`'s `markdown-it` dependency imports Node's `punycode` core module which doesn't exist in the RN runtime (fixed by installing the userland `punycode` package), and `expo-file-system`'s new `Directory`/`File` classes don't work on web at all despite compiling cleanly. Full details and fixes: `AGENTS.md` → "Environment gotchas." Lesson for future milestones: a compiling web bundle proves far less than an actual simulator run — budget for this class of surprise in M3/M4 too, not just M1.
 
 **Explicitly deferred to v2+**
 

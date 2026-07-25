@@ -1,3 +1,8 @@
+// Must be the very first import: polyfills crypto.getRandomValues, which
+// Hermes doesn't provide natively but `ulid` (src/notes/noteRepository.ts)
+// requires. Anything importing ulid transitively must come after this.
+import 'react-native-get-random-values';
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

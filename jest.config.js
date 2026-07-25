@@ -1,7 +1,7 @@
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: "node",
-  testMatch: ["<rootDir>/src/agent/**/*.test.ts"],
+  testMatch: ["<rootDir>/src/agent/**/*.test.ts", "<rootDir>/src/notes/**/*.test.ts"],
   // Live-API smoke tests hit the real OpenRouter API and cost money — never
   // run them as part of the normal suite or CI. See `npm run test:live`.
   testPathIgnorePatterns: ["/node_modules/", "\\.live\\.test\\.ts$"],
