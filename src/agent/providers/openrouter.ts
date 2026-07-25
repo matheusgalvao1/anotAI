@@ -28,7 +28,7 @@ export type OpenRouterProviderOptions = {
  * chat-completions implementation plus OpenRouter's attribution headers.
  *
  * Kept as its own class rather than a bare factory call because it is the one
- * provider verified against a live API (`openrouter.live.test.ts`), and because
+ * provider verified against a live API (`providers.live.test.ts`), and because
  * the attribution headers are specific to it.
  */
 export class OpenRouterProvider implements Provider {

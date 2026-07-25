@@ -3,7 +3,7 @@ import { CanonicalMessage, Provider, ProviderStreamEvent, ToolCall } from "../ty
 
 /**
  * Deterministic coverage for the OpenRouter adapter. The live smoke test
- * (`openrouter.live.test.ts`, run only via `npm run test:live`) proves the
+ * (`providers.live.test.ts`, run only via `npm run test:live`) proves the
  * happy path against the real API; these tests cover the wire-format edge cases
  * that a happy-path request never exercises — fragmented events, CRLF
  * separators, streams that end without a terminator, tool calls closed with an

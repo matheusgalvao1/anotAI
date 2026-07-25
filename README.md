@@ -156,17 +156,21 @@ cp .env.example .env
 
 The agent core has zero dependency on React or React Native, specifically so it can be tested in Node with no simulator and no network — see PRD §11 and §12 for why this ordering matters. `src/agent/providers/mock.ts` provides a scripted `Provider` so loop behavior (tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback) is fully deterministic in tests.
 
-`npm test` never talks to a real model — it's all against the mock provider. `OpenRouterProvider` also has deterministic unit tests (`src/agent/providers/openrouter.test.ts`) covering the wire-format cases a happy-path request never reaches: events fragmented across chunk boundaries, CRLF separators, streams that end without a terminator, tool calls closed with an unexpected `finish_reason`, truncated tool-call JSON, and HTTP status→error-kind mapping. `fetch` is injected there rather than stubbed globally.
+`npm test` never talks to a real model — it's all against the mock provider. Each of the four provider adapters also has deterministic unit tests covering the wire-format cases a happy-path request never reaches: events fragmented across chunk boundaries, CRLF separators, streams that end without a terminator, tool calls closed with an unexpected terminator, truncated tool-call JSON, and HTTP status→error-kind mapping. `fetch` is injected there rather than stubbed globally.
 
-Separately, it **has** been validated against the live API, both via the script below and via a real AI-edited note in the app on an iOS simulator:
+Separately, **OpenRouter** has been validated against its live API, both via the script below and via a real AI-edited note in the app on an iOS simulator:
 
 ```bash
 npm run test:live
 ```
 
-This runs one real turn against OpenRouter (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. Without `OPENROUTER_API_KEY`/`OPENROUTER_DEFAULT_MODEL` set in `.env`, it skips with instructions instead of failing. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident.
+This runs one real turn per configured provider (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. It asserts a tool call actually ran, since a text-only reply means the model never edited anything.
 
-**What the live test does not prove:** it runs under Node, where `globalThis.fetch` is undici, so it exercises a different transport than the app. It validates OpenRouter's wire format, not React Native's — which is why the app now passes `expo/fetch` into `OpenRouterProvider` explicitly (RN's own `fetch` cannot stream at all) and why the SSE edge cases are covered deterministically rather than by the live run. Still open: validation on **physical** iOS/Android hardware, not just simulator.
+Each provider is skipped **independently** when its `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL` pair is missing from `.env`, so filling in one of the four is fine. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident.
+
+**What the live test does not prove:** it runs under Node, where `globalThis.fetch` is undici, so it exercises a different transport than the app. It validates a provider's wire format, not React Native's — which is why the app passes `expo/fetch` into every adapter explicitly (RN's own `fetch` cannot stream at all) and why the SSE edge cases are covered deterministically rather than by the live run.
+
+**Only OpenRouter has actually been run live.** OpenAI, Anthropic and Google Gemini adapters were written from their documented wire formats and are covered deterministically, but no request has been made to them. Anthropic's `partial_json` tool streaming and Gemini's lack of tool-call ids are the two places a documented-vs-actual mismatch would most likely bite. Adding a key for each and running `npm run test:live` is how to close that.
 
 ## License
 
