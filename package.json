@@ -39,8 +39,12 @@
   },
   "scripts": {
     "start": "expo start",
+    "//run": "`ios`/`android` start the dev server for fast JS iteration. `expo prebuild` rewrites these to `expo run:*`, which makes every run a full native compile — if that happens again, change them back and use the :build scripts instead.",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "//build": "Native compiles. Needed only after changing app.json, native config, or adding a native module — and to verify anything Expo Go's own Info.plist masks (e.g. userInterfaceStyle).",
+    "ios:build": "expo run:ios",
+    "android:build": "expo run:android",
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",

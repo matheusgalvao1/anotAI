@@ -7,7 +7,8 @@
     "icon": "./src/app/assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.matheusgalvao.anotai"
     },
     "android": {
       "adaptiveIcon": {
@@ -16,7 +17,8 @@
         "backgroundImage": "./src/app/assets/android-icon-background.png",
         "monochromeImage": "./src/app/assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.matheusgalvao.anotai"
     },
     "web": {
       "favicon": "./src/app/assets/favicon.png"
