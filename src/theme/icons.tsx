@@ -22,6 +22,7 @@ export type IconName =
   | "conceal"
   | "dark"
   | "delete"
+  | "dismissKeyboard"
   | "edit"
   | "key"
   | "light"
@@ -48,6 +49,9 @@ const FEATHER = {
   conceal: "eye-off",
   dark: "moon",
   delete: "trash-2",
+  // A checkmark, not a chevron or a keyboard glyph: it confirms "done editing"
+  // rather than describing the keyboard going away.
+  dismissKeyboard: "check",
   edit: "edit-3",
   key: "key",
   light: "sun",

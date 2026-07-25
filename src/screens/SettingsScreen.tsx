@@ -118,7 +118,14 @@ export function SettingsScreen({ onBack }: Props) {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        // iOS insets the scroll view by the keyboard and scrolls the focused
+        // field into view. Without it, the key and model fields sit under the
+        // keyboard exactly when you're typing into them.
+        automaticallyAdjustKeyboardInsets
+      >
         <Section icon="appearance" title="Appearance">
           <View style={styles.appearanceRow}>
             {APPEARANCE_OPTIONS.map((option) => {

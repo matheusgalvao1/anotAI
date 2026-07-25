@@ -5,6 +5,7 @@ import { Icon, IconName } from "../theme/icons";
 import { Palette } from "../theme/palette";
 import { useTheme } from "../theme/ThemeContext";
 import { TurnStatus } from "./useAgentTurn";
+import { useKeyboardHeight } from "./useKeyboardHeight";
 
 const FAB_SIZE = 62;
 const SMALL_SIZE = 44;
@@ -57,7 +58,13 @@ export function AgentFab({
 }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  // While the keyboard is up it covers the home indicator, so the safe-area
+  // inset would double-count. Sitting on the keyboard's top edge is what keeps
+  // the prompt field and its status line visible as you type.
+  const layerBottom = (keyboardHeight > 0 ? keyboardHeight : insets.bottom) + FLOAT_INSET;
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const inputRef = useRef<TextInput>(null);
@@ -106,7 +113,7 @@ export function AgentFab({
         />
       )}
 
-      <View style={[styles.layer, { bottom: insets.bottom + FLOAT_INSET }]} pointerEvents="box-none">
+      <View style={[styles.layer, { bottom: layerBottom }]} pointerEvents="box-none">
         <View style={styles.promptColumn} pointerEvents="box-none">
           {status && <StatusLine key={status.text} status={status} />}
 

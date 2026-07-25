@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import Markdown from "react-native-markdown-display";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Icon } from "../theme/icons";
@@ -8,6 +8,7 @@ import { useTheme } from "../theme/ThemeContext";
 import { AgentFab } from "./AgentFab";
 import { NoteHighlight } from "./NoteHighlight";
 import { useAgentTurn } from "./useAgentTurn";
+import { useKeyboardHeight } from "./useKeyboardHeight";
 import { useNoteSession } from "./useNoteSession";
 
 type Props = { noteId: string; onBack: () => void };
@@ -23,6 +24,7 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
   const markdownStyles = useMemo(() => makeMarkdownStyles(colors), [colors]);
 
   const session = useNoteSession(noteId);
+  const keyboardHeight = useKeyboardHeight();
   const [previewing, setPreviewing] = useState(false);
   // Only a brand-new note should raise the keyboard on open — otherwise it
   // covers half the note you came to read, plus the whole button cluster.
@@ -51,9 +53,19 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
           <Icon name="back" size={24} color={colors.accent} />
           <Text style={styles.backText}>Notes</Text>
         </Pressable>
-        <Pressable onPress={() => setPreviewing((p) => !p)} hitSlop={12}>
-          <Icon name={previewing ? "edit" : "preview"} size={22} color={colors.text} />
-        </Pressable>
+        <View style={styles.toolbarRight}>
+          <Pressable onPress={() => setPreviewing((p) => !p)} hitSlop={12}>
+            <Icon name={previewing ? "edit" : "preview"} size={22} color={colors.text} />
+          </Pressable>
+          {/* Only while the keyboard is up, as in Apple Notes. A multiline field
+              has no Done key of its own, so without this there is no way to
+              dismiss the keyboard at all. */}
+          {keyboardHeight > 0 && (
+            <Pressable onPress={() => Keyboard.dismiss()} hitSlop={12} accessibilityLabel="Dismiss the keyboard">
+              <Icon name="dismissKeyboard" size={26} color={colors.accent} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {session.storageError && (
@@ -71,7 +83,12 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
         </View>
       )}
 
-      <KeyboardAvoidingView style={styles.content} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <View style={styles.content}>
+        {/* The editing surface is inset by the keyboard so the text being typed
+            is never under it. Separate from the floating cluster's own offset,
+            which is absolutely positioned against `content` and so has to
+            account for the keyboard itself. */}
+        <View style={[styles.editorArea, { paddingBottom: keyboardHeight }]}>
         {turn.highlight ? (
           // Takes the editor's place while a change is tinted. The note is
           // read-only for those few seconds — which costs nothing mid-turn,
@@ -97,6 +114,7 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
             placeholder="Start writing…"
           />
         )}
+        </View>
 
         {/* Owns the status line too, so nothing renders below the prompt field
             where the keyboard would cover it (PRD §7.4). */}
@@ -112,7 +130,7 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
           onClearStatus={turn.clearStatus}
           disabledReason={session.loadFailed ? "This note could not be opened." : turn.disabledReason}
         />
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -159,8 +177,10 @@ const makeStyles = (colors: Palette) =>
       borderBottomColor: colors.border,
     },
     backButton: { flexDirection: "row", alignItems: "center" },
+    toolbarRight: { flexDirection: "row", alignItems: "center", gap: 18 },
     backText: { color: colors.accent, fontSize: 16, fontWeight: "600", marginLeft: 2 },
     content: { flex: 1 },
+    editorArea: { flex: 1 },
     input: { flex: 1, fontSize: 16, padding: 16, color: colors.text },
     inputBusy: { backgroundColor: colors.surface, color: colors.textMuted },
     previewContainer: { padding: 16, paddingBottom: 160 },
