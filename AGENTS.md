@@ -61,9 +61,41 @@ Jest 30 is paired with ts-jest 29 **on purpose** — ts-jest 29.4 declares `jest
   - raising the fd limit (`ulimit -n 65536`)
   - `resolver.useWatchman = false` in a `metro.config.js` (Metro's own watcher is the one running out, so opting out of watchman explicitly changes nothing)
   - `EXPO_NO_TYPESCRIPT_SETUP=1` (the EMFILE lands later, after `xcrun simctl list devices`, so Expo's TypeScript-setup watcher isn't the culprit despite appearing just above it in the debug log)
-- **Don't kill the `watchman` daemon to "clean up".** A long-running daemon keeps working across a `brew upgrade` that replaces its binary; shutting it down is what makes the replacement take effect, and the new binary can come up unable to create FSEvents streams at all. Diagnostic that pins it down: `watchman watch-project <dir>` failing with `FSEventStreamStart failed` for **every** path — including an unprotected one like `/private/tmp` — means the daemon itself is broken, not that a directory is TCC-protected (contrast the `~/Downloads` case above, which is genuinely path-specific). Check `ls -l /opt/homebrew/bin/watchman` against when it last worked. Recovery is `brew reinstall watchman` and/or granting the new binary Full Disk Access in System Settings → Privacy & Security; it is a GUI action, so an agent session cannot do it.
+- **If `watchman watch-project` fails with `FSEventStreamStart failed`, reboot. That is the fix — try it first.** This was diagnosed the long way once; don't repeat it. FSEvents state that breaks this way lives in the kernel, and nothing short of a restart clears it — `watchman shutdown-server` does not, because the daemon is not what is broken.
+  - **Diagnostic first, so you fix the right thing:** run `watchman watch-project /private/tmp`. If that *also* fails, the failure is daemon-wide and a reboot is the answer. If only certain paths fail, it is the TCC/`~/Downloads` case above instead, which is genuinely path-specific.
+  - **Do not grant Full Disk Access.** An earlier revision of this file recommended it. That was a guess from a wrong model of the failure, and it was wrong: FSEvents was failing on `/private/tmp`, which no privacy setting protects. A reboot fixed it with no permission grant of any kind. Don't hand a file-watcher blanket disk access to work around this.
+  - Also tried and useless here: `brew reinstall watchman` (re-pours an identical bottle), `prefer_split_fsevents_watcher: true` in `.watchmanconfig` (fails with `folly::BrokenPromise`), and `{"watcher": "kqueue"}` — that last one *does* bypass FSEvents and starts crawling, then dies on `opendir -> Too many open files` because it wants ~61,484 fds against a `kern.maxfilesperproc` of 61,440. Missing by 44 descriptors is not a margin worth engineering around.
+  - Suspect a plain `brew upgrade` as the trigger. A long-running daemon keeps working on its old binary, so a replacement only takes effect at the next restart — which makes the breakage look like whatever you did just before it, rather than an upgrade from hours earlier. `ls -l /opt/homebrew/bin/watchman` dates the swap.
 - **`userInterfaceStyle` in `app.json` must stay `"automatic"`.** The app ships a Light/Dark/**System** picker built on `useColorScheme()`; setting this to `"light"` (Expo's documented default) forces light appearance app-wide and makes the System option permanently resolve to light. This is invisible in Expo Go, which supplies its own `Info.plist` — it only shows up in a dev or production build. `expo-system-ui` is a required dependency for appearance styles to work on Android builds.
 - **`expo-font` is a required peer dependency of `@expo/vector-icons`**, not optional. Without it the app can crash outside Expo Go. `npx expo-doctor` catches this class of thing; run it after any dependency change.
+
+## Verifying a change actually runs
+
+A clean `tsc` plus a green suite has been insufficient here three times over — `punycode`, the `crypto.getRandomValues` polyfill, and `expo-file-system` on web all compiled fine and failed at runtime. Anything touching native modules, the transport, or app config needs a simulator run.
+
+```bash
+npm run ios                                    # wait for: iOS Bundled <n>ms src/app/index.ts (~1050 modules)
+xcrun simctl io booted screenshot shot.png     # then actually look at it — a blank frame is a failed launch
+```
+
+**A successful bundle is itself a real result.** It proves every native module resolves in the RN runtime, which is exactly the class of failure listed above. Don't treat it as mere preamble to the interesting part.
+
+**You cannot tap.** `osascript`/System Events UI scripting fails with `-1719 not allowed assistive access`, and that needs a GUI grant an agent session can't perform. So don't plan a verification around synthetic taps — inspect state instead, which is more reliable anyway:
+
+```bash
+C=$(xcrun simctl get_app_container booted host.exp.Exponent data)
+E="$C/Documents/ExponentExperienceData/@anonymous/anotai-"*
+ls -lT "$E"/notes/*.md          # mtimes prove *when* a write happened — use them to attribute a change
+cat "$E"/notes/<id>.md          # the note as the app actually persisted it
+cat "$E"/RCTAsyncLocalStorage/manifest.json   # theme preference and anything else in AsyncStorage
+xcrun simctl ui booted appearance light|dark  # drive the system scheme without touching the UI
+```
+
+Timestamps are the useful trick: comparing a note's mtime against the bundle-load time is what distinguishes "an agent turn just succeeded on this code" from "that content was already on disk." Screenshots alone can't tell those apart, and a human poking the simulator while you work will otherwise read as a passing test.
+
+Two things a simulator run **cannot** cover, so don't claim them: `userInterfaceStyle` (Expo Go supplies its own `Info.plist`, so appearance config only takes effect in a dev/production build) and anything gated on a native permission Expo Go already holds.
+
+## The live test proves less than it looks like it does
 
 `npm test` never calls a real model. `*.live.test.ts` files (run via `npm run test:live`, config in `jest.live.config.js`) hit the real OpenRouter API and are excluded from `npm test` on purpose — never fold them into the default suite or CI. They read credentials from `.env` (copy `.env.example`) via `dotenv/config`, loaded only in `jest.live.config.js` — never wire `.env` loading into the main suite or the app itself; the shipped app reads keys from the OS keychain, never env vars (PRD §8). The env var convention is `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`, matching a `Provider.id`, so it extends as more providers land (PRD §14.1).
 

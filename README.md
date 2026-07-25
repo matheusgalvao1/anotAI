@@ -88,9 +88,20 @@ Other scripts: `npm run test:watch`.
 
 ### Running on a device
 
+A successful start prints `iOS Bundled <n>ms src/app/index.ts` with ~1050 modules. That line is worth waiting for rather than skimming past — it's the proof every native module resolved in the React Native runtime, which is where this project's runtime failures have actually come from (see PRD §12).
+
 **Keep this repo out of `~/Downloads`, `~/Desktop`, `~/Documents`, and iCloud Drive.** macOS gates FSEvents (what Watchman/Metro use for file-watching) behind a "Full Disk Access" permission for those specific folders; without it, Metro dies with `EMFILE: too many open files, watch` and no clear reason why. Clone/keep this somewhere ordinary, e.g. `~/Developer/anotai`.
 
-If you ever see `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` — that's not really an error, it's Metro's own recovery routine telling you to literally run the command again. It usually works the second time.
+**Watchman is required, not an optimization.** Without it Metro falls back to Node's `fs.watch`, which cannot watch a tree this size and dies with `EMFILE: too many open files, watch`. That error is almost always about watchman, not about your file-descriptor limit — raising `ulimit -n` doesn't help, and neither does disabling watchman in a `metro.config.js`.
+
+Two failures look identical (`EMFILE`) and have different fixes:
+
+| Symptom | Fix |
+|---|---|
+| `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` | Not really an error — Metro's own recovery routine telling you to run the command again. Usually works the second time. |
+| `watchman watch-project .` fails with `FSEventStreamStart failed` — including on `/private/tmp` | **Reboot.** The broken state is in the kernel; restarting the daemon doesn't clear it. Don't grant Full Disk Access, don't reinstall watchman — neither helps. |
+
+`AGENTS.md` has the full diagnosis and the list of workarounds that were tried and don't work, so nobody has to rediscover them.
 
 See `AGENTS.md`'s "Environment gotchas" section for the full list of environment-specific fixes already applied (crypto polyfill, a Node-core-module shim) — you shouldn't need to redo any of them, they're already in the repo.
 
