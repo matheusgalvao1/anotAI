@@ -290,7 +290,8 @@ This is a deliberate simplification. It eliminates the entire class of write-con
 
 - The final assistant **text** streams into the status line as it arrives.
 - **Edits do not stream into the editor.** `rewrite_note` content arrives as streamed JSON tool-call arguments; rendering partially-parsed JSON into the editor produces visible garbage and broken markdown. Edits apply atomically once the tool call is complete.
-- Cancel aborts the in-flight request. Already-applied tool calls stay applied — but since each turn is one undo entry, one undo still cleans up a cancelled turn completely.
+- Cancel aborts the in-flight request **and puts the pre-turn note back**. An aborted turn is an incomplete one, so whatever it managed to write is half of an edit nobody asked for; leaving it applied contradicts a status that says `Cancelled`. Timing out reverts the same way, for the same reason.
+- The revert leaves **no undo entry**: nothing was adopted, so there is nothing to undo, and the note is exactly as it was before the prompt. (Earlier revisions kept the partial write and relied on the user pressing undo. That made "Cancelled" mean "partly done".)
 
 ### 6.10 System prompt sketch
 
@@ -299,7 +300,7 @@ Not final copy, but the required content:
 - Role: you edit exactly one markdown note. You cannot see or reach any other note.
 - Current note state: title, size, and either the full body or a preview plus `read_note` instructions.
 - Tool selection guidance (§6.5).
-- Output discipline: **make the edit, then reply with at most one short sentence.** No preamble, no restating the note, no offers of further help. The user reads a one-line status field, not a chat.
+- Output discipline: **make the edit, then reply with one short sentence, aiming under 50 characters.** Longer only when the user needs the detail — what the agent couldn't do and why, or a judgement call made on their behalf — and never beyond two sentences. No preamble, no restating the note, no offers of further help. The user reads a status line, not a chat.
 - Markdown conventions: preserve the user's existing style — heading depth, bullet characters, spacing.
 - Refusal path: if the request is impossible or ambiguous, make no edit and say why in one sentence.
 
@@ -370,7 +371,9 @@ Secondary benefit, realized immediately: M2 tests run against a scripted mock pr
 - With no API key: visibly disabled; tapping explains and links to Settings.
 
 ### 7.4 Status line
-Thin, transient, directly **above** the prompt bar. Single line, truncated with tap-to-expand.
+Thin, transient, directly **above** the prompt bar, with no surface of its own. Usually one line; grows to a ceiling of **four lines** and scrolls past that rather than ellipsising — a truncated explanation of what the agent *couldn't* do is worse than no explanation. A reply short enough to fit stays tap-through, so tapping it still closes the prompt field; only one that actually overflows takes touches.
+
+The brevity budget lives in the system prompt (§6.10), not in the component. Truncation is the backstop for a model that ignores it, not the mechanism.
 
 Originally specified as sitting *under* the prompt bar; moved above it because the prompt bar is itself pinned above the keyboard, so anything below it is the first thing the keyboard covers — exactly the message the user needs while a turn runs. Nothing renders below the prompt bar.
 
@@ -433,6 +436,8 @@ Every case needs a message a non-technical user can act on.
 | Timeout (120 s) | `The model took too long.` Turn is abandoned; any applied edits remain undoable. |
 | Malformed tool arguments | Return a validation error to the model and retry within the iteration budget. Enforced at the tool boundary in `src/agent/tools.ts`: arguments are validated before anything touches the note, so a truncated or wrong-typed tool call can never write `undefined` over a note or throw out of the turn. |
 | Cancelled vs. timed out | Distinct outcomes, never conflated. The UI aborts with the `TURN_TIMEOUT` reason on a deadline, so a 120 s timeout reports as a timeout and a user cancel reports as cancelled — regardless of whether the abort surfaces as a thrown `AbortError` or a provider error event. |
+| Cancellation is classified from the **signal**, never from the error's name | Every transport words it differently: the DOM throws `AbortError`, `expo/fetch` throws `Expo.FetchRequestCanceledException` whose name matches nothing. A name check leaked that raw native string to the user as a red error for something they did on purpose. An aborted signal is the reliable evidence. |
+| An abort part-way through the SSE stream | Same as any other cancel. `parseSse` lets a rejected read escape so `stream()` can classify it as a transport error; before that was caught, the exception bypassed the turn result entirely and surfaced the transport's own words. Three independent layers now cover it — the provider, the loop's `abortResult`, and a final `signal.aborted` check in `useAgentTurn`'s catch. |
 | Loop exhausted | `Stopped after 8 steps.` Applied edits stay. |
 | Note too large (>2 MB) | Prompt bar disabled for that note with a reason. Editing still works. |
 | Disk write failure | Surface immediately and loudly. Silent data loss is the worst outcome in the app. |

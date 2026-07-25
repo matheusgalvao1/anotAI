@@ -56,6 +56,43 @@ async function collect(provider: Provider, messages: CanonicalMessage[] = []): P
   return events;
 }
 
+async function collectWith(provider: Provider, signal: AbortSignal): Promise<ProviderStreamEvent[]> {
+  const events: ProviderStreamEvent[] = [];
+  for await (const event of provider.send({ system: "sys", messages: [], tools: [], signal })) {
+    events.push(event);
+  }
+  return events;
+}
+
+/**
+ * A stream that delivers some chunks and then fails, as an aborted read does.
+ *
+ * Pull-based on purpose: `controller.error()` discards anything still queued, so
+ * enqueueing everything up front and then erroring would deliver no chunks at
+ * all and wouldn't test a *mid*-stream failure.
+ */
+function erroringStream(chunks: string[], err: unknown): ReadableStream<Uint8Array> {
+  let next = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (next < chunks.length) {
+        controller.enqueue(new TextEncoder().encode(chunks[next++]));
+        return;
+      }
+      controller.error(err);
+    },
+  });
+}
+
+/**
+ * What `expo/fetch` actually throws when its request is cancelled. The name is
+ * not `AbortError` and matches nothing standard — which is the whole reason
+ * cancellation is classified from the signal rather than from the error.
+ */
+function expoCancellation(): Error {
+  return new Error("The operation couldn’t be completed. (Expo.FetchRequestCanceledException error 1.)");
+}
+
 function toolCalls(events: ProviderStreamEvent[]): ToolCall[] {
   return events.filter((e): e is { type: "toolCall"; call: ToolCall } => e.type === "toolCall").map((e) => e.call);
 }
@@ -288,6 +325,62 @@ describe("OpenRouterProvider error mapping", () => {
     });
     const events = await collect(provider);
     expect(events).toEqual([{ type: "error", error: { kind: "cancelled", message: "The request was cancelled." } }]);
+  });
+
+  it("reports a cancellation whose error name is not AbortError, using the signal", async () => {
+    // The regression: expo/fetch's exception name matches nothing, so a
+    // name-only check reported this as a network fault and the editor showed
+    // the raw native message for something the user did deliberately.
+    const controller = new AbortController();
+    controller.abort();
+    const provider = new OpenRouterProvider({
+      apiKey: "k",
+      model: "m",
+      fetch: async () => {
+        throw expoCancellation();
+      },
+    });
+
+    expect(await collectWith(provider, controller.signal)).toEqual([
+      { type: "error", error: { kind: "cancelled", message: "The request was cancelled." } },
+    ]);
+  });
+
+  it("reports an abort part-way through the stream as a cancellation", async () => {
+    // parseSse lets a rejected read escape so it can be classified here. Before
+    // this was caught, the exception propagated out of runTurn entirely.
+    const controller = new AbortController();
+    controller.abort();
+    const provider = new OpenRouterProvider({
+      apiKey: "k",
+      model: "m",
+      fetch: async () =>
+        new Response(
+          erroringStream([dataEvent({ choices: [{ delta: { content: "half a rep" } }] })], expoCancellation()),
+          { status: 200 },
+        ),
+    });
+
+    const events = await collectWith(provider, controller.signal);
+    expect(textOf(events)).toBe("half a rep");
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      error: { kind: "cancelled", message: "The request was cancelled." },
+    });
+  });
+
+  it("reports a mid-stream failure that is not an abort as a network error", async () => {
+    const provider = new OpenRouterProvider({
+      apiKey: "k",
+      model: "m",
+      fetch: async () =>
+        new Response(erroringStream([dataEvent({ choices: [{ delta: { content: "hi" } }] })], new Error("socket died")), {
+          status: 200,
+        }),
+    });
+
+    const events = await collectWith(provider, new AbortController().signal);
+    expect(events.at(-1)).toEqual({ type: "error", error: { kind: "network", message: "socket died" } });
   });
 
   it("forwards the abort signal and auth header to fetch", async () => {

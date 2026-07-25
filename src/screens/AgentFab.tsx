@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon, IconName } from "../theme/icons";
 import { Palette } from "../theme/palette";
@@ -9,6 +9,10 @@ import { TurnStatus } from "./useAgentTurn";
 const FAB_SIZE = 62;
 const SMALL_SIZE = 44;
 const FLOAT_INSET = 20;
+/** Explicit, because the 4-line ceiling below is computed from it. */
+const STATUS_LINE_HEIGHT = 18;
+const STATUS_MAX_LINES = 4;
+const STATUS_MAX_HEIGHT = STATUS_LINE_HEIGHT * STATUS_MAX_LINES;
 
 type Props = {
   canUndo: boolean;
@@ -104,14 +108,7 @@ export function AgentFab({
 
       <View style={[styles.layer, { bottom: insets.bottom + FLOAT_INSET }]} pointerEvents="box-none">
         <View style={styles.promptColumn} pointerEvents="box-none">
-          {status && (
-            <View style={styles.statusRow} pointerEvents="none">
-              {status.kind === "working" && <ActivityIndicator size="small" color={colors.textSecondary} />}
-              <Text style={[styles.statusText, styles[`status_${status.kind}`]]} numberOfLines={3}>
-                {status.text}
-              </Text>
-            </View>
-          )}
+          {status && <StatusLine key={status.text} status={status} />}
 
           {showComposer && (
             <View style={styles.composerCard}>
@@ -149,6 +146,38 @@ export function AgentFab({
         </View>
       </View>
     </>
+  );
+}
+
+/**
+ * The model's reply. Capped at four lines and scrollable past that, rather than
+ * ellipsised — a truncated explanation of what the agent *couldn't* do is worse
+ * than no explanation.
+ *
+ * Module scope, and keyed on the message by its caller, so each new status
+ * measures itself from scratch instead of inheriting the last one's overflow.
+ */
+function StatusLine({ status }: { status: NonNullable<TurnStatus> }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const [overflowing, setOverflowing] = useState(false);
+
+  return (
+    <View style={styles.statusRow} pointerEvents="box-none">
+      {status.kind === "working" && <ActivityIndicator size="small" color={colors.textSecondary} />}
+      <ScrollView
+        style={styles.statusScroll}
+        contentContainerStyle={styles.statusScrollContent}
+        // A short reply stays tap-through, so tapping it still closes the
+        // prompt field; only a reply that actually overflows takes touches.
+        pointerEvents={overflowing ? "auto" : "none"}
+        scrollEnabled={overflowing}
+        showsVerticalScrollIndicator={overflowing}
+        onContentSizeChange={(_width, height) => setOverflowing(height > STATUS_MAX_HEIGHT + 1)}
+      >
+        <Text style={[styles.statusText, styles[`status_${status.kind}`]]}>{status.text}</Text>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -223,8 +252,10 @@ const makeStyles = (colors: Palette) =>
     },
     // No surface of its own: it reads as a caption on the prompt field, not a
     // separate panel.
-    statusRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 6 },
-    statusText: { flex: 1, fontSize: 13, fontWeight: "500" },
+    statusRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 6 },
+    statusScroll: { flex: 1, maxHeight: STATUS_MAX_HEIGHT },
+    statusScrollContent: { paddingRight: 2 },
+    statusText: { fontSize: 13, lineHeight: STATUS_LINE_HEIGHT, fontWeight: "500" },
     status_working: { color: colors.textSecondary },
     status_success: { color: colors.success },
     status_none: { color: colors.textMuted },

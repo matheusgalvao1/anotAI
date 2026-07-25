@@ -14,6 +14,8 @@ export type NoteSession = {
   edit: (next: string) => void;
   /** Adopts a body the agent already persisted, as a single undo entry for the whole turn. */
   adoptAgentResult: (next: string) => void;
+  /** Puts the pre-turn body back after an aborted turn, leaving no undo entry behind. */
+  revertAgentResult: (previous: string) => void;
   canUndo: boolean;
   canRedo: boolean;
   undo: () => void;
@@ -133,6 +135,22 @@ export function useNoteSession(noteId: string): NoteSession {
     [syncUndoFlags],
   );
 
+  const revertAgentResult = useCallback(
+    (previous: string) => {
+      // A cancelled turn should leave no trace. The agent writes through its own
+      // NoteStore, so a partial edit may already be on disk even though nothing
+      // was ever adopted into the UI — this puts the pre-turn body back.
+      //
+      // The undo stack is deliberately untouched: nothing was pushed, so there
+      // is nothing to undo, and "Cancelled" means the note is as it was.
+      cancelPendingSave();
+      setBody(previous);
+      bodyRef.current = previous;
+      persist(previous);
+    },
+    [cancelPendingSave, persist],
+  );
+
   const applyHistory = useCallback(
     (restored: string) => {
       cancelPendingSave();
@@ -172,6 +190,7 @@ export function useNoteSession(noteId: string): NoteSession {
     bodyRef,
     edit,
     adoptAgentResult,
+    revertAgentResult,
     canUndo,
     canRedo,
     undo,

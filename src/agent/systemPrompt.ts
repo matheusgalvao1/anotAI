@@ -10,7 +10,7 @@ const TOOL_GUIDANCE = `Tool selection:
 
 const FORCED_REWRITE_NOTE = `This note is short enough that patch_note is not offered. Use rewrite_note for any edit.`;
 
-const OUTPUT_DISCIPLINE = `Output discipline: make the edit, then reply with at most one short sentence. No preamble, no restating the note, no offers of further help. Your reply is shown in a one-line status field, not a chat — the user will not see a conversation.`;
+const OUTPUT_DISCIPLINE = `Output discipline: make the edit, then reply with one short sentence. Aim for under 50 characters — "Fixed the typo." or "Reordered by date." is the right shape. Go longer only when the user genuinely needs the detail: what you could not do and why, or a judgement call you had to make on their behalf. Never more than two sentences. No preamble, no restating the note, no offers of further help. Your reply appears in a small status line above the prompt field, not a chat — the user will not see a conversation, and a reply long enough to need scrolling is already too long.`;
 
 const MARKDOWN_CONVENTIONS = `Preserve the user's existing markdown style: heading depth, bullet characters, and spacing conventions already used in the note.`;
 

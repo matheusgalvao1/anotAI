@@ -42,6 +42,11 @@ type Params = {
   flush: () => void;
   /** Called with the new body when a turn changed the note. */
   onBodyChanged: (next: string) => void;
+  /**
+   * Called with the pre-turn body when a turn was aborted, so a half-applied
+   * edit doesn't survive a cancel the user read as "nothing happened".
+   */
+  onRevert: (previous: string) => void;
   /** Called when storage itself failed, so the editor can surface it loudly. */
   onStorageError: (message: string) => void;
 };
@@ -91,7 +96,7 @@ function describeTurnError(err: unknown): string {
  * credentials, provider construction, per-note conversation history,
  * cancellation and its deadline, and turning failures into human sentences.
  */
-export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onStorageError }: Params): AgentTurn {
+export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, onStorageError }: Params): AgentTurn {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<TurnStatus>(null);
   const [disabledReason, setDisabledReason] = useState<string | null>("Checking for an OpenRouter key…");
@@ -147,6 +152,10 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onStorageE
         return;
       }
 
+      // Captured before anything runs: the note to restore to if this turn is
+      // aborted part-way through a write.
+      const preTurnBody = bodyRef.current;
+
       const controller = new AbortController();
       abortRef.current = controller;
       const timeout = setTimeout(() => controller.abort(TURN_TIMEOUT), AGENT_CONFIG.REQUEST_TIMEOUT_MS);
@@ -166,7 +175,16 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onStorageE
         });
 
         historyRef.current = result.updatedHistory;
-        if (result.bodyChanged) onBodyChanged(result.newBody);
+
+        const aborted = result.stoppedReason === "cancelled" || result.stoppedReason === "timed_out";
+        // An aborted turn is an incomplete one: whatever it managed to write is
+        // half of an edit nobody asked for, so it goes back rather than being
+        // adopted. Only a turn that ran to completion changes the note.
+        if (aborted) {
+          if (result.bodyChanged) onRevert(preTurnBody);
+        } else if (result.bodyChanged) {
+          onBodyChanged(result.newBody);
+        }
 
         if (result.stoppedReason === "cancelled") {
           setTransientStatus({ kind: "cancelled", text: "Cancelled" });
@@ -180,15 +198,28 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onStorageE
       } catch (err) {
         // A storage failure is not a turn outcome — it means the note may not
         // have been written, which the editor has to say loudly.
-        if (err instanceof NoteStoreError) onStorageError(err.message);
-        setTransientStatus({ kind: "error", text: describeTurnError(err) });
+        if (err instanceof NoteStoreError) {
+          onStorageError(err.message);
+          setTransientStatus({ kind: "error", text: describeTurnError(err) });
+        } else if (controller.signal.aborted) {
+          // The last line of defence. Whatever a transport throws when it's
+          // cancelled, the aborted signal is the fact that matters — never show
+          // the user a raw exception for something they did on purpose.
+          onRevert(preTurnBody);
+          const timedOut = controller.signal.reason === TURN_TIMEOUT;
+          setTransientStatus(
+            timedOut ? { kind: "error", text: "The request timed out." } : { kind: "cancelled", text: "Cancelled" },
+          );
+        } else {
+          setTransientStatus({ kind: "error", text: describeTurnError(err) });
+        }
       } finally {
         clearTimeout(timeout);
         abortRef.current = null;
         setBusy(false);
       }
     },
-    [busy, flush, bodyRef, noteId, onBodyChanged, onStorageError, setTransientStatus],
+    [busy, flush, bodyRef, noteId, onBodyChanged, onRevert, onStorageError, setTransientStatus],
   );
 
   const cancel = useCallback(() => abortRef.current?.abort(), []);

@@ -32,6 +32,7 @@ export function NoteEditorScreen({ noteId, onBack }: Props) {
     bodyRef: session.bodyRef,
     flush: session.flush,
     onBodyChanged: session.adoptAgentResult,
+    onRevert: session.revertAgentResult,
     onStorageError: session.reportStorageError,
   });
 

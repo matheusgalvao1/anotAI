@@ -87,7 +87,7 @@ export class OpenRouterProvider implements Provider {
         signal: req.signal,
       });
     } catch (err) {
-      yield { type: "error", error: toNetworkError(err) };
+      yield { type: "error", error: toTransportError(err, req.signal) };
       return;
     }
 
@@ -111,7 +111,15 @@ export class OpenRouterProvider implements Provider {
       return;
     }
 
-    yield* parseSse(response.body);
+    // Aborting mid-stream rejects the reader, and `parseSse` deliberately lets
+    // that through so it can be classified here alongside every other transport
+    // failure. Without this the exception escaped `runTurn` entirely and the
+    // editor showed the transport's own words instead of "Cancelled".
+    try {
+      yield* parseSse(response.body);
+    } catch (err) {
+      yield { type: "error", error: toTransportError(err, req.signal) };
+    }
   }
 }
 
@@ -166,11 +174,17 @@ async function toHttpError(response: FetchLikeResponse): Promise<ProviderError> 
   return { kind, message, status: response.status };
 }
 
-function toNetworkError(err: unknown): ProviderError {
-  // An adapter can't know *why* the signal fired — a user tapping cancel and a
-  // deadline elapsing look identical here. Report the neutral fact and let the
-  // caller, which owns the abort reason, decide how to describe it.
-  if (err instanceof Error && err.name === "AbortError") {
+function toTransportError(err: unknown, signal?: AbortSignal): ProviderError {
+  // An aborted signal is the reliable evidence, not the error's shape. Every
+  // transport words cancellation differently — the DOM throws an `AbortError`,
+  // while `expo/fetch` throws `Expo.FetchRequestCanceledException`, whose name
+  // matches nothing — and matching on names leaked a raw native message to the
+  // user whenever a new transport appeared.
+  //
+  // An adapter still can't know *why* the signal fired: a user tapping cancel
+  // and a deadline elapsing look identical here. Report the neutral fact and let
+  // the caller, which owns the abort reason, decide how to describe it.
+  if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
     return { kind: "cancelled", message: "The request was cancelled." };
   }
   return { kind: "network", message: err instanceof Error ? err.message : "Network request failed." };
