@@ -55,7 +55,15 @@ export function parseOpenAiModels(payload: unknown): CatalogueModel[] {
     // none of which can run a turn. Without a capability flag, the id is all
     // there is to go on.
     if (!/^(gpt-|o[134])/.test(id)) continue;
-    if (/audio|realtime|transcribe|tts|image|embedding|moderation|instruct/.test(id)) continue;
+    if (/audio|realtime|transcribe|tts|image|embedding|moderation|instruct|deep-research/.test(id)) continue;
+    // Reasoning models stay in. It is tempting to filter them out — one of them
+    // refuses tools on /v1/chat/completions — but that is not a property of the
+    // family: o1, o3, o3-mini, o4-mini, gpt-5 and gpt-5-mini all accept tools
+    // here. Only a narrower set (gpt-5.6-luna is the one seen) requires the
+    // Responses API, and there is no way to tell from the id.
+    //
+    // So capability is not guessed at here. `validateApiKey` sends a real tool
+    // and lets the provider answer, which is the only check that can be right.
     models.push({ id, name: id, providerId: "openai" });
   }
   return models;

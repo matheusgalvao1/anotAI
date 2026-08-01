@@ -81,13 +81,22 @@ describe("sortModels", () => {
 describe("parseOpenAiModels", () => {
   const payload = (...ids: string[]) => ({ data: ids.map((id) => ({ id })) });
 
+  /**
+   * Reasoning models are kept on purpose. `gpt-5.6-luna` refuses tools on
+   * /v1/chat/completions, but that was wrongly generalised to the whole family
+   * once: o1, o3, o3-mini, o4-mini, gpt-5 and gpt-5-mini were each checked
+   * against the live API and all accept tools. Filtering by id would hide
+   * working models, so the tool-carrying request in `validateApiKey` is what
+   * decides instead.
+   */
   it("keeps chat and reasoning families", () => {
-    expect(parseOpenAiModels(payload("gpt-4o", "gpt-4o-mini", "o3", "o4-mini")).map((m) => m.id)).toEqual([
-      "gpt-4o",
-      "gpt-4o-mini",
-      "o3",
-      "o4-mini",
-    ]);
+    expect(parseOpenAiModels(payload("gpt-4o", "gpt-4o-mini", "gpt-5-mini", "o3", "o4-mini")).map((m) => m.id)).toEqual(
+      ["gpt-4o", "gpt-4o-mini", "gpt-5-mini", "o3", "o4-mini"],
+    );
+  });
+
+  it("drops deep-research variants, which are not chat models", () => {
+    expect(parseOpenAiModels(payload("o3-deep-research", "o4-mini-deep-research")).map((m) => m.id)).toEqual([]);
   });
 
   it("drops models that cannot run a turn", () => {
