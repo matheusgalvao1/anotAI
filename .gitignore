@@ -1,46 +1,55 @@
-# Dart and Flutter
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+Thumbs.db
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder may contain useful shared launch configurations and tasks,
+# so it is intentionally not ignored by default.
+
+# Flutter, Dart, and Pub
+**/doc/api/
+**/ios/Flutter/.last_build_id
 .dart_tool/
-.flutter-plugins
 .flutter-plugins-dependencies
-.packages
+.pub-cache/
 .pub/
 /build/
 /coverage/
 
-# FVM: pin the version in .fvmrc, never commit local SDK links or caches.
+# FVM: .fvmrc is tracked; SDK links and machine-local state are not.
 .fvm/
 
-# IDEs
-.idea/
-.vscode/
-*.iml
-*.swp
+# Symbolication and obfuscation outputs
+app.*.symbols
+app.*.map.json
 
-# Android generated/local files
-android/.gradle/
-android/local.properties
-android/key.properties
-android/**/GeneratedPluginRegistrant.java
+# Android Studio build artifacts
+/android/app/debug
+/android/app/profile
+/android/app/release
 
-# Apple generated/local files
-ios/Flutter/ephemeral/
-ios/Flutter/Generated.xcconfig
-ios/Flutter/flutter_export_environment.sh
-ios/Pods/
-ios/.symlinks/
-ios/**/xcuserdata/
-ios/**/*.xcuserstate
-ios/Runner/GeneratedPluginRegistrant.*
-
-# Local secrets
+# Local secrets and signing material
 .env*
 *.jks
 *.keystore
+*.key
 *.p8
 *.p12
 *.pem
 *.mobileprovision
-
-# Operating system files
-.DS_Store
-Thumbs.db

@@ -40,7 +40,9 @@ Code under `lib/features/<feature>/` is split by responsibility:
 - `widgets/`: reusable presentation components local to a feature.
 
 Views never access persistence directly. Storage and future provider adapters
-must be replaceable without changing view code.
+must be replaceable without changing view code. Concrete repositories are
+created only in the app composition root; views receive already-constructed
+controllers. A view must never import from a feature's `data/` directory.
 
 ## Editor invariants
 

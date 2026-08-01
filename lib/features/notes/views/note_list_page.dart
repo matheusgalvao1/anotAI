@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../controllers/note_editor_controller.dart';
 import '../controllers/notes_controller.dart';
 import '../models/note.dart';
 import 'note_editor_page.dart';
@@ -8,11 +9,13 @@ import 'note_editor_page.dart';
 class NoteListPage extends StatefulWidget {
   const NoteListPage({
     required this.controller,
+    required this.createEditorController,
     required this.onOpenSettings,
     super.key,
   });
 
   final NotesController controller;
+  final NoteEditorController Function(Note note) createEditorController;
   final void Function(BuildContext context) onOpenSettings;
 
   @override
@@ -30,8 +33,7 @@ class _NoteListPageState extends State<NoteListPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => NoteEditorPage(
-          note: note,
-          repository: widget.controller.repository,
+          controller: widget.createEditorController(note),
         ),
       ),
     );

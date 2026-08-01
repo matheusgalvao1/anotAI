@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_theme.dart';
+import '../features/notes/controllers/note_editor_controller.dart';
 import '../features/notes/controllers/notes_controller.dart';
+import '../features/notes/data/in_memory_notes_repository.dart';
 import '../features/notes/data/notes_repository.dart';
 import '../features/notes/views/note_list_page.dart';
 import '../features/settings/controllers/appearance_controller.dart';
@@ -16,13 +18,15 @@ class AnotaiApp extends StatefulWidget {
 
 class _AnotaiAppState extends State<AnotaiApp> {
   late final AppearanceController _appearanceController;
+  late final NotesRepository _notesRepository;
   late final NotesController _notesController;
 
   @override
   void initState() {
     super.initState();
     _appearanceController = AppearanceController();
-    _notesController = NotesController(InMemoryNotesRepository.seeded());
+    _notesRepository = InMemoryNotesRepository.seeded();
+    _notesController = NotesController(_notesRepository);
   }
 
   @override
@@ -43,6 +47,10 @@ class _AnotaiAppState extends State<AnotaiApp> {
           themeMode: _appearanceController.themeMode,
           home: NoteListPage(
             controller: _notesController,
+            createEditorController: (note) => NoteEditorController(
+              note: note,
+              repository: _notesRepository,
+            ),
             onOpenSettings: (context) => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => SettingsPage(controller: _appearanceController),

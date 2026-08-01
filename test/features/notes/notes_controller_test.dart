@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:anotai/features/notes/controllers/notes_controller.dart';
-import 'package:anotai/features/notes/data/notes_repository.dart';
+import 'package:anotai/features/notes/data/in_memory_notes_repository.dart';
 
 void main() {
   test('create, delete, and restore stay behind the repository boundary',

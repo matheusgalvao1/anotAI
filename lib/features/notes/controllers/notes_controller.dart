@@ -4,9 +4,9 @@ import '../data/notes_repository.dart';
 import '../models/note.dart';
 
 class NotesController extends ChangeNotifier {
-  NotesController(this.repository);
+  NotesController(this._repository);
 
-  final NotesRepository repository;
+  final NotesRepository _repository;
 
   List<Note> _notes = const [];
   bool _isLoading = false;
@@ -21,7 +21,7 @@ class NotesController extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      _notes = await repository.list();
+      _notes = await _repository.list();
     } catch (error) {
       _error = error;
     } finally {
@@ -31,21 +31,21 @@ class NotesController extends ChangeNotifier {
   }
 
   Future<Note> createNote() async {
-    final note = await repository.create();
+    final note = await _repository.create();
     await load();
     return note;
   }
 
   Future<Note?> deleteNote(String id) async {
-    final deleted = await repository.find(id);
+    final deleted = await _repository.find(id);
     if (deleted == null) return null;
-    await repository.delete(id);
+    await _repository.delete(id);
     await load();
     return deleted;
   }
 
   Future<void> restoreNote(Note note) async {
-    await repository.save(note);
+    await _repository.save(note);
     await load();
   }
 }

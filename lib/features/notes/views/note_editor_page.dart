@@ -4,20 +4,16 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/note_editor_controller.dart';
-import '../data/notes_repository.dart';
-import '../models/note.dart';
 import '../widgets/ai_prompt_composer.dart';
 import '../widgets/markdown_editing_controller.dart';
 
 class NoteEditorPage extends StatefulWidget {
   const NoteEditorPage({
-    required this.note,
-    required this.repository,
+    required this.controller,
     super.key,
   });
 
-  final Note note;
-  final NotesRepository repository;
+  final NoteEditorController controller;
 
   @override
   State<NoteEditorPage> createState() => _NoteEditorPageState();
@@ -33,12 +29,9 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
   @override
   void initState() {
     super.initState();
-    _controller = NoteEditorController(
-      note: widget.note,
-      repository: widget.repository,
-    );
+    _controller = widget.controller;
     _textController = MarkdownEditingController(
-      text: widget.note.body,
+      text: _controller.note.body,
       palette: const MarkdownPalette(
         text: Colors.black,
         muted: Colors.grey,
@@ -47,7 +40,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
       ),
     );
 
-    if (widget.note.body.isEmpty) {
+    if (_controller.note.body.isEmpty) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _noteFocus.requestFocus());
     }

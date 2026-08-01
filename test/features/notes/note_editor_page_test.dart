@@ -1,4 +1,5 @@
-import 'package:anotai/features/notes/data/notes_repository.dart';
+import 'package:anotai/features/notes/controllers/note_editor_controller.dart';
+import 'package:anotai/features/notes/data/in_memory_notes_repository.dart';
 import 'package:anotai/features/notes/models/note.dart';
 import 'package:anotai/features/notes/views/note_editor_page.dart';
 import 'package:flutter/material.dart';
@@ -19,7 +20,11 @@ void main() {
     await repository.save(note);
 
     await tester.pumpWidget(
-      MaterialApp(home: NoteEditorPage(note: note, repository: repository)),
+      MaterialApp(
+        home: NoteEditorPage(
+          controller: NoteEditorController(note: note, repository: repository),
+        ),
+      ),
     );
 
     var editor = tester.widget<TextField>(find.byKey(const Key('note-editor')));

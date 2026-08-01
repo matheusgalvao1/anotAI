@@ -6,12 +6,15 @@ import '../data/notes_repository.dart';
 import '../models/note.dart';
 
 class NoteEditorController extends ChangeNotifier {
-  NoteEditorController({required Note note, required this.repository})
-      : _note = note;
+  NoteEditorController({
+    required Note note,
+    required NotesRepository repository,
+  })  : _note = note,
+        _repository = repository;
 
   static const saveDelay = Duration(milliseconds: 450);
 
-  final NotesRepository repository;
+  final NotesRepository _repository;
   Note _note;
   Timer? _saveTimer;
   bool _promptOpen = false;
@@ -51,7 +54,7 @@ class NoteEditorController extends ChangeNotifier {
     await _save();
   }
 
-  Future<void> _save() => repository.save(_note);
+  Future<void> _save() => _repository.save(_note);
 
   @override
   void dispose() {

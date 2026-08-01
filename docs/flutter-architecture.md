@@ -9,14 +9,18 @@ this working tree.
 ```text
 lib/features/notes/
   models/       immutable note data and derived title/preview
-  data/         repository contract and the current in-memory implementation
+  data/
+    notes_repository.dart            storage contract
+    in_memory_notes_repository.dart  temporary UI-stage implementation
   controllers/  list/editor state, save scheduling, prompt mode
   views/        screen composition and navigation
   widgets/      reusable editor and prompt presentation
 ```
 
-- Views never read or write storage directly.
+- Views never import repositories or read/write storage directly.
 - Controllers know repository interfaces, never concrete persistence details.
+- The app composition root creates concrete repositories and injects
+  repository-backed controllers into views.
 - The `NotesRepository` contract is the seam for the next local markdown-file
   implementation.
 - The live Markdown editor uses a single `TextField`. Styled spans always
@@ -34,9 +38,9 @@ File persistence and AI/provider code belong to the next phases.
 ## Commands
 
 ```bash
-flutter pub get
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
-flutter run
+fvm flutter pub get
+fvm dart format --output=none --set-exit-if-changed lib test
+fvm flutter analyze
+fvm flutter test
+fvm flutter run
 ```
