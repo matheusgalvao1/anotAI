@@ -1,14 +1,5 @@
 import { CanonicalMessage, Provider, ProviderRequest, ProviderStreamEvent, ToolCall, ToolSchema } from "../types";
-import {
-  FetchLike,
-  FetchLikeResponse,
-  httpErrorKind,
-  readErrorMessage,
-  readSseEvents,
-  resolveFetch,
-  sseData,
-  toTransportError,
-} from "./transport";
+import { FetchLike, openProviderStream, readSseEvents, sseData, toTransportError, usageEvent } from "./transport";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -51,18 +42,11 @@ export class AnthropicProvider implements Provider {
       ...(req.tools.length > 0 ? { tools: req.tools.map(toAnthropicTool) } : {}),
     };
 
-    const doFetch = resolveFetch(this.opts.fetch);
-    if (!doFetch) {
-      yield {
-        type: "error",
-        error: { kind: "network", message: "No fetch implementation available. Pass one via the provider options." },
-      };
-      return;
-    }
-
-    let response: FetchLikeResponse;
-    try {
-      response = await doFetch(ANTHROPIC_URL, {
+    const opened = await openProviderStream({
+      url: ANTHROPIC_URL,
+      displayName: "Anthropic",
+      fetch: this.opts.fetch,
+      init: {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -71,32 +55,19 @@ export class AnthropicProvider implements Provider {
         },
         body: JSON.stringify(body),
         signal: req.signal,
-      });
-    } catch (err) {
-      yield { type: "error", error: toTransportError(err, req.signal) };
+      },
+    });
+
+    if ("error" in opened) {
+      yield { type: "error", error: opened.error };
       return;
     }
 
-    if (!response.ok) {
-      const message = await readErrorMessage(response, `Anthropic request failed (HTTP ${response.status}).`);
-      yield { type: "error", error: { kind: httpErrorKind(response.status), message, status: response.status } };
-      return;
-    }
-
-    if (!response.body) {
-      yield {
-        type: "error",
-        error: {
-          kind: "network",
-          message:
-            "The fetch implementation in use does not expose a streaming response body, so the model's reply cannot be read. Pass expo/fetch to the provider.",
-        },
-      };
-      return;
-    }
-
+    // Aborting mid-stream rejects the reader, and `readSseEvents` deliberately
+    // lets that through so it can be classified here alongside every other
+    // transport failure rather than escaping `runTurn` as a raw exception.
     try {
-      yield* parseAnthropicStream(response.body);
+      yield* parseAnthropicStream(opened.stream);
     } catch (err) {
       yield { type: "error", error: toTransportError(err, req.signal) };
     }
@@ -155,13 +126,8 @@ async function* parseAnthropicStream(stream: ReadableStream<Uint8Array>): AsyncI
       case "message_start": {
         // Input tokens arrive on message_start, output on message_delta's usage.
         const usage = parsed.usage ?? parsed.message?.usage;
-        if (usage) {
-          const inputTokens = Number(usage.input_tokens ?? 0);
-          const outputTokens = Number(usage.output_tokens ?? 0);
-          if (Number.isFinite(inputTokens) && Number.isFinite(outputTokens) && inputTokens + outputTokens > 0) {
-            yield { type: "usage", inputTokens, outputTokens };
-          }
-        }
+        const usageReport = usage ? usageEvent(usage.input_tokens, usage.output_tokens) : null;
+        if (usageReport) yield usageReport;
         break;
       }
 
@@ -196,35 +162,47 @@ function finishToolBlock(block: ToolBlock): ToolCall {
   }
 }
 
+type AnthropicMessage = { role: "user" | "assistant"; content: unknown[] };
+
+/**
+ * Appends a content block, merging into the previous message when the role
+ * matches.
+ *
+ * The API rejects two messages with the same role in a row, and the canonical
+ * history does not guarantee alternation: a `tool` result becomes a *user*
+ * message here, so a turn that ended on one is immediately followed by the next
+ * turn's prompt. Merging by role is what makes every history shape sendable
+ * rather than only the ones a clean turn produces.
+ */
+function appendBlock(out: AnthropicMessage[], role: "user" | "assistant", block: unknown): void {
+  const last = out[out.length - 1];
+  if (last?.role === role) last.content.push(block);
+  else out.push({ role, content: [block] });
+}
+
 /**
  * Canonical messages → Anthropic's shape.
  *
  * The awkward part is that a `tool` result is not its own role: it must ride
- * inside a **user** message as a `tool_result` block. Consecutive tool results
- * are merged into one user message, because the API rejects two user messages in
- * a row.
+ * inside a **user** message as a `tool_result` block.
  */
 function toAnthropicMessages(messages: CanonicalMessage[]): unknown[] {
-  const out: { role: "user" | "assistant"; content: unknown[] }[] = [];
+  const out: AnthropicMessage[] = [];
 
   for (const m of messages) {
     if (m.role === "tool") {
-      const block = { type: "tool_result", tool_use_id: m.toolCallId, content: m.content };
-      const last = out[out.length - 1];
-      if (last?.role === "user") last.content.push(block);
-      else out.push({ role: "user", content: [block] });
+      appendBlock(out, "user", { type: "tool_result", tool_use_id: m.toolCallId, content: m.content });
       continue;
     }
 
     if (m.role === "assistant" && "toolCalls" in m) {
-      out.push({
-        role: "assistant",
-        content: m.toolCalls.map((tc) => ({ type: "tool_use", id: tc.id, name: tc.name, input: tc.arguments })),
-      });
+      for (const tc of m.toolCalls) {
+        appendBlock(out, "assistant", { type: "tool_use", id: tc.id, name: tc.name, input: tc.arguments });
+      }
       continue;
     }
 
-    out.push({ role: m.role, content: [{ type: "text", text: (m as { content: string }).content }] });
+    appendBlock(out, m.role, { type: "text", text: (m as { content: string }).content });
   }
 
   return out;

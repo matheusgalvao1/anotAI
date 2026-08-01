@@ -1,14 +1,5 @@
-import { CanonicalMessage, Provider, ProviderError, ProviderRequest, ProviderStreamEvent, ToolCall, ToolSchema } from "../types";
-import {
-  FetchLike,
-  FetchLikeResponse,
-  httpErrorKind,
-  readErrorMessage,
-  readSseEvents,
-  resolveFetch,
-  sseData,
-  toTransportError,
-} from "./transport";
+import { CanonicalMessage, Provider, ProviderRequest, ProviderStreamEvent, ToolCall, ToolSchema } from "../types";
+import { FetchLike, openProviderStream, readSseEvents, sseData, toTransportError, usageEvent } from "./transport";
 
 /**
  * The OpenAI chat-completions protocol, which more than one provider speaks.
@@ -52,18 +43,11 @@ export class OpenAiCompatibleProvider implements Provider {
       ...(req.tools.length > 0 ? { tools: req.tools.map(toOpenAiTool) } : {}),
     };
 
-    const doFetch = resolveFetch(this.opts.fetch);
-    if (!doFetch) {
-      yield {
-        type: "error",
-        error: { kind: "network", message: "No fetch implementation available. Pass one via the provider options." },
-      };
-      return;
-    }
-
-    let response: FetchLikeResponse;
-    try {
-      response = await doFetch(this.opts.url, {
+    const opened = await openProviderStream({
+      url: this.opts.url,
+      displayName: this.opts.displayName,
+      fetch: this.opts.fetch,
+      init: {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -72,33 +56,11 @@ export class OpenAiCompatibleProvider implements Provider {
         },
         body: JSON.stringify(body),
         signal: req.signal,
-      });
-    } catch (err) {
-      yield { type: "error", error: toTransportError(err, req.signal) };
-      return;
-    }
+      },
+    });
 
-    if (!response.ok) {
-      const message = await readErrorMessage(
-        response,
-        `${this.opts.displayName} request failed (HTTP ${response.status}).`,
-      );
-      yield { type: "error", error: { kind: httpErrorKind(response.status), message, status: response.status } };
-      return;
-    }
-
-    // A successful response with no readable body means the fetch in use can't
-    // stream — reporting that as an HTTP error would have blamed the provider
-    // for a local wiring problem ("request failed (HTTP 200)").
-    if (!response.body) {
-      yield {
-        type: "error",
-        error: {
-          kind: "network",
-          message:
-            "The fetch implementation in use does not expose a streaming response body, so the model's reply cannot be read. Pass expo/fetch to the provider.",
-        },
-      };
+    if ("error" in opened) {
+      yield { type: "error", error: opened.error };
       return;
     }
 
@@ -107,7 +69,7 @@ export class OpenAiCompatibleProvider implements Provider {
     // transport failure. Without this the exception escaped `runTurn` entirely
     // and the editor showed the transport's own words instead of "Cancelled".
     try {
-      yield* this.parseStream(response.body);
+      yield* this.parseStream(opened.stream);
     } catch (err) {
       yield { type: "error", error: toTransportError(err, req.signal) };
     }
@@ -197,11 +159,8 @@ function* parseChunk(event: string, buffers: Map<number, ToolCallBuffer>): Gener
   }
 
   if (parsed.usage) {
-    const inputTokens = Number(parsed.usage.prompt_tokens ?? 0);
-    const outputTokens = Number(parsed.usage.completion_tokens ?? 0);
-    if (Number.isFinite(inputTokens) && Number.isFinite(outputTokens)) {
-      yield { type: "usage", inputTokens, outputTokens };
-    }
+    const event = usageEvent(parsed.usage.prompt_tokens, parsed.usage.completion_tokens);
+    if (event) yield event;
   }
 
   const choice = parsed.choices?.[0];
@@ -232,5 +191,3 @@ function* parseChunk(event: string, buffers: Map<number, ToolCallBuffer>): Gener
     yield* flushToolCalls(buffers);
   }
 }
-
-export type { ProviderError };

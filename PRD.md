@@ -549,7 +549,7 @@ Three planned features, ordered by cost-to-value. Only §14.1 imposes any v1 obl
 
 OpenRouter, OpenAI, Anthropic and Google Gemini all ship adapters implementing `Provider` (§6.11). The prediction held: the loop, tools, compaction and UI were untouched, and each provider is an additive file.
 
-**How the four divide up.** OpenRouter *is* an OpenAI-compatible endpoint, so it and OpenAI are the same implementation (`openaiCompatible.ts`) with a different base URL and headers. Anthropic and Google are separate protocols and have their own adapters. Shared network concerns — cancellation detection, SSE event framing, HTTP status mapping — live in `transport.ts` so four adapters can't drift on the parts that have already cost debugging time.
+**How the four divide up.** OpenRouter is an OpenAI-compatible chat-completions endpoint and uses the shared `openaiCompatible.ts` implementation. OpenAI, Anthropic and Google each have their own adapter — OpenAI's speaks the **Responses API** (`/v1/responses`), not chat-completions, because that is the only endpoint that accepts function tools for every OpenAI model. Shared network concerns — cancellation detection, SSE event framing, HTTP status mapping — live in `transport.ts` so four adapters can't drift on the parts that have already cost debugging time.
 
 **What differs per provider, all of it load-bearing:**
 
@@ -559,11 +559,19 @@ OpenRouter, OpenAI, Anthropic and Google Gemini all ship adapters implementing `
 | Anthropic | top-level `system` field | `tool_use` blocks; args stream as `partial_json` per block index | `tool_result` block inside a **user** message | `x-api-key` + `anthropic-version` |
 | Google Gemini | `systemInstruction` field | `functionCall` parts, complete in one part | `functionResponse` keyed **by name** | `x-goog-api-key` |
 
-**Gemini has no tool-call ids.** The canonical format needs one to correlate a result with its call, so ids are synthesised on the way in (`name-index`, unique within a turn) and mapped back to function names on the way out by walking the preceding assistant tool calls. This is the sharpest edge in the four adapters.
+**Gemini is the sharpest edge in the four adapters**, for two reasons.
+
+Tool results are keyed **by name**, so an id is mapped back to a function name on the way out by walking the preceding assistant tool calls. Gemini 3 does send its own call `id`, but older models send none, so one is still synthesised when absent (`name-index`, unique within a turn) — and a synthesised id is never echoed back, since correlating against an id the model never issued is worse than sending none.
+
+And **a `functionCall` part carries a `thoughtSignature` that must be returned with it**, as a sibling key rather than a field inside `functionCall`. Replaying the call without it fails the *next* request outright. This is what `ToolCall.providerData` exists for: opaque per-provider state that the loop carries and only the issuing adapter reads. See AGENTS.md.
 
 **Model catalogues differ too, and only OpenRouter publishes tool-calling support** (`supported_parameters`). The other three are filtered by id against families known to support tools — an imperfect heuristic, chosen because offering a model that fails on its first tool call is worse, as is listing embedding and audio models that can't hold a conversation. Gemini's ids also carry a `models/` prefix that has to be stripped or the request path doubles it. Only OpenRouter's catalogue is readable without a key.
 
-**Verification status.** Only OpenRouter has actually been run against a live API. `providers.live.test.ts` covers all four and skips each independently when its key pair is absent from `.env`, so verifying the others is a matter of adding keys. The other three are covered by deterministic tests written from the documented wire formats — request shaping, SSE grammar, tool-call assembly, error mapping — which is the same class of coverage that caught the real OpenRouter bugs, but it is **not** proof that the live APIs behave as documented. Extending `npm run test:live` with a key per provider is the remaining gap.
+**Verification status.** All four have now completed a real note edit against their live API via `providers.live.test.ts`, which skips each independently when its key pair is absent from `.env`. Three of the four failed on that first live run despite passing every deterministic test — the documented wire format was not the actual one. See README for what each failure was; the short version is that Gemini needed thought signatures round-tripped, and Anthropic's `partial_json` streaming (flagged here as the likeliest problem) was fine.
+
+**The chat-completions gap is closed.** Some OpenAI models reject function tools on `/v1/chat/completions` and require `/v1/responses`, and which ones is not predictable from the id — probed live, only `gpt-5.6-luna` refused, while `o1`/`o3`/`o4-mini`/`gpt-5`/`gpt-5-mini` all accepted. Rather than guess per model, the OpenAI adapter now speaks the Responses API for everything; all OpenAI models accept tools there. `reasoning_effort: "none"` was rejected as a workaround, since models that don't want the parameter fail on it.
+
+That endpoint brings its own obligation. With `store: false` — required, since the app has no backend (§1) — the reasoning item preceding a tool call must be replayed in the next request, which is the second use of `ToolCall.providerData` after Gemini. Its failure mode is quieter than Gemini's: omitting it does not error, the model just returns an empty final message.
 
 **Open points**
 - Model capability discovery. OpenRouter exposes `/models`; direct providers each differ. Tool-calling support is not uniformly advertised and may need a curated allowlist per provider.

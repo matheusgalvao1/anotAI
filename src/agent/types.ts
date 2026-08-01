@@ -2,6 +2,19 @@ export type ToolCall = {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /**
+   * Opaque per-provider state that must be handed back verbatim when this call
+   * is replayed in history. Nothing outside the adapter that produced it may
+   * read or depend on the shape — the loop and the tools carry it and no more.
+   *
+   * It exists because some APIs sign their own tool calls and then reject a
+   * conversation that returns the call without the signature: Gemini 3 fails the
+   * *next* request with "Function call is missing a thought_signature in
+   * functionCall parts", so a signature dropped here breaks the turn one step
+   * later, nowhere near the adapter that dropped it. Treat it as required
+   * plumbing, not an optimisation.
+   */
+  providerData?: unknown;
 };
 
 export type CanonicalMessage =
@@ -61,9 +74,9 @@ export type ProviderRequest = {
 };
 
 /**
- * Everything the agent loop needs from an LLM backend. OpenRouter is the only
- * implementation in v1; Anthropic/OpenAI/Google adapters (see PRD §14.1) are
- * additive implementations of this same interface, not loop changes.
+ * Everything the agent loop needs from an LLM backend. Four adapters implement
+ * it — OpenRouter, OpenAI, Anthropic, Google Gemini (PRD §14.1) — and the loop
+ * knows about none of them. A fifth is an additive file, not a loop change.
  */
 export interface Provider {
   readonly id: string;

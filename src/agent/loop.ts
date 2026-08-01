@@ -193,7 +193,16 @@ export async function runTurn(params: RunTurnParams): Promise<TurnResult> {
     const timedOut = signal.reason === TURN_TIMEOUT;
     stoppedReason = timedOut ? "timed_out" : "cancelled";
     finalText = timedOut ? "Timed out" : "Cancelled";
-    return buildResult();
+    // An aborted turn is discarded, not recorded. The caller reverts the note to
+    // its pre-turn body (see `useAgentTurn`), so keeping the prompt and whatever
+    // partial output arrived would leave the history describing edits that no
+    // longer exist — and the next turn would ask the model to build on them.
+    //
+    // It also matters to the wire format: a turn aborted before the model
+    // replied leaves history ending on a `user` message, so the next turn
+    // appends a second one. OpenAI-shaped APIs tolerate that; Anthropic rejects
+    // consecutive same-role messages outright.
+    return { ...buildResult(), updatedHistory: params.history };
   }
 
   function buildResult(): TurnResult {

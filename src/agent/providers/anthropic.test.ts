@@ -123,6 +123,45 @@ describe("AnthropicProvider request shaping", () => {
     expect(userMessages).toHaveLength(1);
     expect(userMessages[0].content).toHaveLength(2);
   });
+
+  /**
+   * The API rejects two messages with the same role in a row, and history is not
+   * guaranteed to alternate. A turn that hit the iteration cap ends on a tool
+   * result — which becomes a *user* message here — and the next turn appends the
+   * user's new prompt straight after it. Merging by role is what keeps any
+   * history shape sendable, rather than only the shapes a clean turn produces.
+   */
+  it("merges a user prompt that follows a tool result", async () => {
+    const { provider, sentBody } = providerFor([sse("message_stop")]);
+    await collect(provider, [
+      { role: "assistant", toolCalls: [{ id: "a", name: "rewrite_note", arguments: {} }] },
+      { role: "tool", toolCallId: "a", content: "1" },
+      { role: "user", content: "and now this" },
+    ]);
+
+    const messages = sentBody().messages as { role: string; content: unknown[] }[];
+    expect(messages.map((m) => m.role)).toEqual(["assistant", "user"]);
+    expect(messages[1].content).toEqual([
+      { type: "tool_result", tool_use_id: "a", content: "1" },
+      { type: "text", text: "and now this" },
+    ]);
+  });
+
+  it("merges consecutive assistant messages", async () => {
+    const { provider, sentBody } = providerFor([sse("message_stop")]);
+    await collect(provider, [
+      { role: "user", content: "go" },
+      { role: "assistant", content: "thinking" },
+      { role: "assistant", toolCalls: [{ id: "a", name: "read_note", arguments: {} }] },
+    ]);
+
+    const messages = sentBody().messages as { role: string; content: unknown[] }[];
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(messages[1].content).toEqual([
+      { type: "text", text: "thinking" },
+      { type: "tool_use", id: "a", name: "read_note", input: {} },
+    ]);
+  });
 });
 
 describe("AnthropicProvider streaming", () => {
