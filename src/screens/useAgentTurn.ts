@@ -4,7 +4,7 @@ import { FileNoteStore } from "../notes/agentNoteStore";
 import { ChangedRange, changedRange } from "../notes/changedRange";
 import { deriveTitleAndPreview } from "../notes/title";
 import { buildProvider } from "../settings/buildProvider";
-import { ProviderId } from "../settings/providers";
+import { describeProvider, ProviderId } from "../settings/providers";
 import { getProviderKey, getSelectedModel } from "../settings/secureSettings";
 
 const STATUS_CLEAR_MS = 30_000;
@@ -58,26 +58,42 @@ type Params = {
   onStorageError: (message: string) => void;
 };
 
-function describeTurnError(err: unknown): string {
+/**
+ * Turn a failure into one line for the status area.
+ *
+ * `provider` is the display name of whichever provider the turn actually ran
+ * against. It is a parameter rather than the literal "OpenRouter" these strings
+ * used to hard-code: with four providers wired up, a 404 from Anthropic was
+ * telling the user to check the model name on OpenRouter — advice for a service
+ * they weren't using. A wrong provider name sends someone to the wrong Settings
+ * field, so it is worth threading through.
+ */
+function describeTurnError(err: unknown, provider: string): string {
   if (err instanceof NoteStoreError) return err.message;
   if (err instanceof AgentProviderError) {
     switch (err.providerError.kind) {
       case "auth":
-        return "Your OpenRouter key was rejected. Check it in Settings.";
+        return `Your ${provider} key was rejected. Check it in Settings.`;
       case "insufficient_credits":
-        return "Your OpenRouter account is out of credits.";
+        return `Your ${provider} account is out of credits.`;
       case "rate_limit":
-        return "OpenRouter rate-limited this request. Try again in a moment.";
+        return `${provider} rate-limited this request. Try again in a moment.`;
       case "not_found":
-        return "That model isn't available on OpenRouter. Check the model name in Settings.";
+        // Providers word this uselessly — Anthropic's whole message for an unknown
+        // model is "model: claude-haiku-4.5" — so the message is quoted after a
+        // sentence that says what to do about it, rather than shown on its own.
+        return `That model isn't available on ${provider}. Check the model in Settings. (${err.providerError.message})`;
       case "no_tool_support":
-        return "This model doesn't support tool calling. Try a different model in Settings.";
+        // Quoted for the same reason as not_found: the advice is the useful part,
+        // but the provider's sentence is what says *why* this model was refused,
+        // and it varies enough that paraphrasing it would be a guess.
+        return `This model can't edit notes — it doesn't support tool calling. Pick another in Settings. (${err.providerError.message})`;
       case "cancelled":
         return "Cancelled";
       case "timeout":
         return "The request timed out.";
       case "network":
-        return "No internet connection, or OpenRouter is unreachable.";
+        return `No internet connection, or ${provider} is unreachable.`;
       default:
         return err.providerError.message || "Something went wrong.";
     }
@@ -94,7 +110,7 @@ function describeTurnError(err: unknown): string {
 export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, onStorageError }: Params): AgentTurn {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<TurnStatus>(null);
-  const [disabledReason, setDisabledReason] = useState<string | null>("Checking for an OpenRouter key…");
+  const [disabledReason, setDisabledReason] = useState<string | null>("Checking for a provider key…");
   const [highlight, setHighlight] = useState<ChangeHighlight>(null);
 
   const historyRef = useRef<CanonicalMessage[]>([]);
@@ -169,6 +185,11 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
       // aborted part-way through a write.
       const preTurnBody = bodyRef.current;
 
+      // Read outside the try so the catch can name the right provider — the user
+      // could have changed the selection in Settings by the time it fails.
+      const { providerId, apiKey, model } = credentialsRef.current;
+      const providerLabel = describeProvider(providerId).label;
+
       const controller = new AbortController();
       abortRef.current = controller;
       const timeout = setTimeout(() => controller.abort(TURN_TIMEOUT), AGENT_CONFIG.REQUEST_TIMEOUT_MS);
@@ -178,7 +199,6 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
       setTransientStatus({ kind: "working", text: "Thinking…" });
 
       try {
-        const { providerId, apiKey, model } = credentialsRef.current;
         const result = await runTurn({
           prompt,
           noteTitle: deriveTitleAndPreview(bodyRef.current).title,
@@ -221,7 +241,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
         // have been written, which the editor has to say loudly.
         if (err instanceof NoteStoreError) {
           onStorageError(err.message);
-          setTransientStatus({ kind: "error", text: describeTurnError(err) });
+          setTransientStatus({ kind: "error", text: describeTurnError(err, providerLabel) });
         } else if (controller.signal.aborted) {
           // The last line of defence. Whatever a transport throws when it's
           // cancelled, the aborted signal is the fact that matters — never show
@@ -233,7 +253,7 @@ export function useAgentTurn({ noteId, bodyRef, flush, onBodyChanged, onRevert, 
             timedOut ? { kind: "error", text: "The request timed out." } : { kind: "cancelled", text: "Cancelled" },
           );
         } else {
-          setTransientStatus({ kind: "error", text: describeTurnError(err) });
+          setTransientStatus({ kind: "error", text: describeTurnError(err, providerLabel) });
         }
       } finally {
         clearTimeout(timeout);

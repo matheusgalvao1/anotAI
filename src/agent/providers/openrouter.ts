@@ -27,9 +27,9 @@ export type OpenRouterProviderOptions = {
  * OpenRouter, which is an OpenAI-compatible endpoint — so this is the shared
  * chat-completions implementation plus OpenRouter's attribution headers.
  *
- * Kept as its own class rather than a bare factory call because it is the one
- * provider verified against a live API (`providers.live.test.ts`), and because
- * the attribution headers are specific to it.
+ * Kept as its own class rather than a bare factory call because the attribution
+ * headers are specific to it, and because a named provider per id keeps
+ * `buildProvider` a straight mapping.
  */
 export class OpenRouterProvider implements Provider {
   readonly id = "openrouter";
@@ -54,7 +54,3 @@ export class OpenRouterProvider implements Provider {
     return this.inner.send(req);
   }
 }
-
-// Re-exported so existing importers keep working after the transport types moved
-// into their own module.
-export type { FetchLike, FetchLikeInit, FetchLikeResponse } from "./transport";

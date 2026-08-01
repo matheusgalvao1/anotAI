@@ -2,7 +2,7 @@ import { AGENT_CONFIG } from "./config";
 import { runTurn, TURN_TIMEOUT } from "./loop";
 import { InMemoryNoteStore, NoteStore, NoteStoreError } from "./noteStore";
 import { ScriptedProvider } from "./providers/mock";
-import { Provider, ToolCall } from "./types";
+import { CanonicalMessage, Provider, ToolCall } from "./types";
 
 function toolCall(name: string, args: Record<string, unknown>, id = "call_1"): ToolCall {
   return { id, name, arguments: args };
@@ -187,6 +187,37 @@ describe("runTurn", () => {
     expect(result.stoppedReason).toBe("cancelled");
     expect(result.finalText).toBe("Cancelled");
     expect(result.bodyChanged).toBe(false);
+  });
+
+  /**
+   * The caller reverts the note when a turn aborts, so the history has to be
+   * discarded with it — otherwise the two disagree, and the next turn tells the
+   * model it made edits that were rolled back underneath it.
+   *
+   * It also leaves history ending on a `user` message, so the next turn appends
+   * a second one. OpenAI-shaped APIs tolerate that; Anthropic rejects it.
+   */
+  it("discards an aborted turn's history rather than half-recording it", async () => {
+    const store = new InMemoryNoteStore("body");
+    const controller = new AbortController();
+    controller.abort();
+    const history: CanonicalMessage[] = [
+      { role: "user", content: "earlier" },
+      { role: "assistant", content: "earlier reply" },
+    ];
+    const provider = new ScriptedProvider([[{ type: "text", delta: "too late" }]]);
+
+    const result = await runTurn({
+      prompt: "cancel me",
+      noteTitle: "Untitled",
+      store,
+      history,
+      provider,
+      signal: controller.signal,
+    });
+
+    expect(result.updatedHistory).toEqual(history);
+    expect(result.updatedHistory.at(-1)).not.toMatchObject({ content: "cancel me" });
   });
 
   it("throws an AgentProviderError when the provider reports an error", async () => {
