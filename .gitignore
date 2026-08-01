@@ -31,8 +31,11 @@ yarn-error.*
 *.pem
 
 # local env files (API keys etc. must never be committed)
-.env
-.env*.local
+# Everything but the checked-in template: `.env` and `.env*.local` alone left
+# ordinary variants like `.env.bak` or `.env.openai` committable, which is a
+# one-typo route to publishing a key.
+.env*
+!.env.example
 
 # typescript
 *.tsbuildinfo

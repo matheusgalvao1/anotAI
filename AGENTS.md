@@ -6,8 +6,8 @@ This file is for AI coding agents (and anyone else automating changes) working i
 
 anotAI is a local-first notes app (iOS/Android, Expo + React Native + TypeScript) with a built-in AI editor. Notes are markdown files on the device; an agent edits the open note via tool calls; the only network traffic is LLM inference to OpenRouter using a user-supplied key. No backend, no account, no telemetry.
 
-- Full spec, architecture, and open decisions: **[PRD.md](./PRD.md)**
-- Current milestone status and setup instructions: **[README.md](./README.md)**
+- Full spec, architecture, milestones, and open decisions: **[PRD.md](./PRD.md)**
+- Setup and instructions for running the app: **[README.md](./README.md)**
 
 Read both before making non-trivial changes — this file is operating conventions, not the spec.
 
@@ -34,6 +34,40 @@ Verify with: `grep -rn "from \"react\|from \"expo\|react-native" src/agent/` —
 - **Recoverable, model-facing:** malformed tool arguments. Validated at the tool boundary in `src/agent/tools.ts` and returned as `{ok: false, error}` so the model can correct itself on the next iteration. These must never throw — a thrown validation error kills the whole turn and surfaces a raw JS message to the user.
 - **Not recoverable, user-facing:** storage failures. `src/notes/noteRepository.ts` wraps every filesystem call and throws `NoteStoreError`; `runTurn` rethrows it rather than reporting it to the model, and the editor shows a persistent banner. PRD §14's error matrix calls silent data loss the worst outcome in the app, so nothing on this path may be swallowed or auto-dismissed.
 
+## `ToolCall.providerData` is required plumbing, not an optimisation
+
+A provider may sign the tool calls it issues and then reject a conversation that replays one without the signature. `ToolCall.providerData` is the opaque slot for that state: the adapter that produced a call is the only thing allowed to read it, and the loop and tools carry it untouched.
+
+Gemini is the live case — a `functionCall` part comes with a `thoughtSignature` **beside** it (a sibling key, not a field inside `functionCall`), and omitting it on replay fails the *next* request with "Function call is missing a thought_signature in functionCall parts". Note the failure mode: it lands one step after the code that caused it, so it reads as a loop or model bug rather than a serialisation one. The Gemini adapter passed every deterministic test it had while doing this.
+
+Two rules follow. **Round-trip state must be captured at the same time as the call, in the same adapter** — anything reconstructed later is a guess. And **`providerData` must be read back defensively** (`googleCallState`), never cast: it's `unknown` by design, history can be rehydrated from storage, and the user can switch providers mid-session, so an adapter can be handed a shape another adapter wrote.
+
+If a new provider needs the same treatment, it gets its own state type and its own guard — don't widen Gemini's.
+
+## Anything user-facing about a provider takes the provider's name as a parameter
+
+`describeTurnError` in `src/screens/useAgentTurn.ts` hard-coded "OpenRouter" in five messages, so once four providers were wired up an Anthropic 404 told the user to check the model name on OpenRouter. A wrong provider name sends someone to the wrong Settings field, which is worse than a vague message. The name comes from `describeProvider(id).label`.
+
+Related: **quote the provider's own error text after your advice, don't replace it.** These messages are wildly uneven — Anthropic's entire message for an unknown model is `model: claude-haiku-4.5` — so neither showing it alone nor hiding it works. Advice first, provider text in parentheses.
+
+## A model id is a config value, and every provider spells them differently
+
+Four conventions, all of which have produced a failed run here: OpenRouter usually wants a provider prefix (`openai/gpt-4o-mini`), OpenAI never does, Anthropic dashes its version numbers and never dots them (`claude-haiku-4-5-20251001`, so `claude-haiku-4.5` 404s), and Gemini ids must omit the `models/` prefix its own catalogue returns. `.env.example` documents each one at the variable that needs it. When a live test fails on a model id, check the convention before the adapter.
+
+## OpenAI speaks the Responses API; OpenRouter speaks chat-completions
+
+`openai.ts` posts to **`/v1/responses`**, and is not the `openaiCompatible.ts` implementation. That split is deliberate and shouldn't be "simplified" back into one.
+
+The reason is that `/v1/chat/completions` cannot serve every OpenAI model: some reject function tools there outright (`Function tools with reasoning_effort are not supported for <model> in /v1/chat/completions`). Which ones is **not predictable from the id** — probed live, `o1`, `o3`, `o3-mini`, `o4-mini`, `gpt-5`, `gpt-5-mini`, `gpt-4o-mini` and `gpt-4.1-mini` all accept tools on chat-completions, and only `gpt-5.6-luna` refused. `/v1/models` publishes no capability flag either. Every one of them accepts tools on `/v1/responses`, so the adapter speaks only that and the question stops existing. Don't reintroduce `reasoning_effort` to work around it — models that don't want it reject it as an unknown parameter.
+
+Twice now, one model's behaviour has been generalised into a rule about "reasoning models", and the second time that rule reached the code and hid working models from the picker. **Capability is never inferred from a model id.** `validateApiKey` sends a real tool and lets the provider answer; `classifyHttpError` maps a refusal to `no_tool_support` for anything selected without validating. Any "does this model work" check must carry a tool — answering a plain prompt proves nothing about the only thing this app ever asks a model to do. If you want to know whether a model works, probe it.
+
+Three Responses-specific things that will bite:
+
+- **`store: false`, and reasoning items must be replayed.** The API otherwise keeps the conversation server-side for `previous_response_id`; this app has no backend by design (PRD §1). Opting out means the reasoning item that precedes a tool call has to travel back in the next request's `input`, which needs `include: ["reasoning.encrypted_content"]` on the way out. This is the same class of problem as Gemini's `thoughtSignature` and uses the same `ToolCall.providerData` slot — with **its own state type and guard** (`ResponsesCallState`), not a widened `GoogleCallState`.
+- **Dropping the reasoning item does not error.** Unlike Gemini, which fails the next request loudly, OpenAI accepts the replay and the model returns an **empty final message** — so the turn "succeeds" having said nothing. Verified both ways against the live API. A passing turn is not evidence this is right; the round-trip tests in `openai.test.ts` are.
+- **An unknown model is a 400 here, not a 404.** "The requested model 'x' does not exist." `isModelNotFoundError` in `transport.ts` exists for that, and it is checked *after* the tool-support heuristic because a tool refusal names a model too.
+
 ## Commands
 
 ```bash
@@ -50,7 +84,11 @@ Test files are type-checked separately via `tsconfig.jest.json` (they need Jest'
 
 Jest 30 is paired with ts-jest 29 **on purpose** — ts-jest 29.4 declares `jest: "^29.0.0 || ^30.0.0"`, so this is supported, not a mismatch. Expo SDK 57 separately pins jest ~29 for `jest-expo`, which this project doesn't use; that's recorded in `package.json`'s `expo.install.exclude` so `expo-doctor` stays green. Don't "fix" it by downgrading.
 
-## Environment gotchas (all found the hard way getting M1 running on an iOS simulator)
+## Environment gotchas (all found the hard way getting the app running on a simulator and a device)
+
+- **`ios/` holds absolute paths, so moving the checkout breaks the native build.** CocoaPods writes the repo's absolute path into ~200 generated files under `ios/`. Relocating the repo after a build fails with `virtual filesystem overlay file '<old path>/ios/Pods/React-Core-prebuilt/React-VFS.yaml' not found` — an error naming a directory that no longer exists, which reads as corruption rather than a stale path. Recovery is `rm -rf ios/build node_modules/expo-modules-jsi/apple/.DerivedData`, then `pod install --project-directory=ios`. **Then check `HERMES_CLI_PATH`** in `ios/Pods/Target Support Files/Pods-anotAI/*.xcconfig`: `pod install` restores every other path correctly but regenerates that one from a cache and can reinstate the old location, which breaks release bundling later and nothing before it.
+- **`expo run:ios` prints "Build Succeeded" and can still fail afterwards**, during install or launch — a locked device is the common one (`Cannot launch anotAI on <device> because the device is locked`), and it lands after a full compile. Read the last line, not the encouraging one in the middle. Do not pipe the command through `tee` to capture a log: the shell reports the *pipe's* exit status, so a failed build exits 0 and looks like a pass. Redirect instead (`> build.log 2>&1`).
+- **A physical iOS device needs Developer Mode on and the screen unlocked** before `expo run:ios --device` reaches its install step. `xcrun devicectl list devices` shows whether the device is paired; `xcrun devicectl device info details --device <id>` reports `developerModeStatus`. Neither the unlock nor the "Trust this computer" prompt can be driven from a shell.
 
 - **Never locate this repo inside `~/Downloads`, `~/Desktop`, `~/Documents`, or iCloud Drive.** macOS requires the terminal app to have "Full Disk Access" (or Files & Folders access) to run FSEvents on those specific folders; without it, `watchman watch-project` fails with `FSEventStreamStart failed`, and Metro falls back to Node's `fs.watch`, which then dies with `EMFILE: too many open files, watch` on a tree this size. Keep the repo somewhere ordinary, e.g. `~/Developer/`.
 - **`react-native-get-random-values` must be the first import in `src/app/index.ts`**, before anything else. `ulid` (used by `src/notes/noteRepository.ts`) needs `crypto.getRandomValues`, which Hermes doesn't provide natively; the polyfill has to run before any module that might call `ulid()` is evaluated.
@@ -105,4 +143,4 @@ Two things a simulator run **cannot** cover, so don't claim them: `userInterface
 
 ## Keeping this file current
 
-When a milestone in the README moves from not-started to done, or a new architectural rule gets established (a new invariant, a new required check before commit, a new directory convention), add it here. This file should never fall behind the actual state of the repo.
+When a milestone lands, or a new architectural rule gets established (a new invariant, a new required check before commit, a new directory convention), add it here. This file should never fall behind the actual state of the repo.

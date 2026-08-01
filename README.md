@@ -2,79 +2,82 @@
 
 A local-first notes app for iOS and Android with a built-in AI editor. Notes are plain markdown files on the device. A floating prompt bar lets you ask an AI to edit the note you have open — the AI acts on the note directly; it doesn't chat.
 
-The agent — the loop that talks to the model and executes its tool calls — runs entirely inside the app. The only network traffic is LLM inference, sent directly to [OpenRouter](https://openrouter.ai) using an API key you supply. There is no backend, no account, and no telemetry.
+The agent — the loop that talks to the model and executes its tool calls — runs entirely inside the app. The only network traffic is LLM inference, sent directly to whichever provider you configure — [OpenRouter](https://openrouter.ai), OpenAI, Anthropic, or Google Gemini — using an API key you supply. There is no backend, no account, and no telemetry.
 
-Full product spec: **[PRD.md](./PRD.md)**.
-
-## Status
-
-Building in the milestone order described in the PRD, agent core first because it's where the real risk lives and it's far cheaper to get right without a UI attached.
-
-- [x] **M2 — Agent runtime, headless.** Loop, tools, provider interface, compaction. Pure TypeScript, tested in Jest with no simulator and no network. → [`src/agent/`](./src/agent)
-- [x] **M1 — Notes app, no AI.** List, editor, file storage, trash, undo. → [`src/notes/`](./src/notes), [`src/screens/`](./src/screens). Confirmed on an iOS simulator: create/edit/delete/swipe-to-delete-with-undo/manual undo-redo all manually tested and working.
-- [x] **M3 — Wire it up.** `runTurn()` is connected to a real editor: Settings screen (OpenRouter key + model, OS keychain, live validation), a FAB-driven prompt composer (soft-lock while a turn runs, turn-level undo, error messages mapped from the provider's error kinds). **Confirmed working end-to-end against the live API** — an actual AI-edited note exists on the test simulator. Also includes a full design pass beyond M3's original scope: light/dark/system theming with an orange accent (persisted, `src/theme/`), vector icons throughout, and the FAB composer's current design (Undo/Redo stacked above the FAB; the FAB itself becomes the send button when the composer is open).
-- [ ] **M4 — Change highlighting.** Diff-based highlight of the last agent turn.
-- [ ] **M5 — Harden.** Full error matrix, cross-model testing, physical-device validation, store prep.
-
-(M2 before M1 is deliberate — see PRD §11.)
-
-**Editor decision:** M1 uses a plain `TextInput` + a toggled markdown preview, not live inline formatting. Three candidates were spiked and compared — see PRD §7.2 and §12. Live inline formatting (à la `react-native-live-markdown`) is the confirmed target for a later polish pass, pending a dev-client build to validate it on real iOS/Android (it doesn't run in Expo Go).
+- **[PRD.md](./PRD.md)** — product spec, architecture, milestones, open decisions
+- **[AGENTS.md](./AGENTS.md)** — conventions, invariants and environment gotchas for anyone changing the code
 
 ## Stack
 
 - **Expo** (React Native) + TypeScript, strict mode
-- **Jest** + `ts-jest` for the agent core — runs headless, no `jest-expo`/simulator required
-- **OpenRouter** as the only LLM provider in v1, behind a `Provider` interface designed so additional providers (OpenAI, Anthropic, Google — see PRD §14.1) are additive, not a rewrite
+- **Jest** + `ts-jest` for the agent core — headless, no `jest-expo` or simulator required
+- **Four LLM providers** — OpenRouter, OpenAI, Anthropic, Google Gemini — behind one `Provider` interface, so adding another is additive rather than a rewrite (PRD §14.1)
+
+The editor is a plain `TextInput` with a toggled markdown preview rather than live inline formatting. Three approaches were compared before settling on it — see PRD §7.2.
 
 ## Project layout
 
 ```
-src/agent/              agent core — plain TypeScript, no React/RN imports
-  types.ts              canonical message format + Provider interface
+src/agent/               agent core — plain TypeScript, no React/RN imports
+  index.ts               the core's public surface
+  types.ts               canonical message format + Provider interface
   config.ts              tunable constants (iteration cap, thresholds, timeout)
   tools.ts               read_note / rewrite_note / patch_note
-  systemPrompt.ts         per-turn system prompt (inline vs. read_note mode)
-  compaction.ts           context summarization once a session exceeds 50k tokens
-  loop.ts                 runTurn() — the agent loop
-  noteStore.ts            NoteStore interface + in-memory implementation for tests
+  systemPrompt.ts        per-turn system prompt (inline vs. read_note mode)
+  tokens.ts              chars/4 estimate, a guardrail for the thresholds below
+  compaction.ts          context summarization once a session exceeds 50k tokens
+  loop.ts                runTurn() — the agent loop
+  noteStore.ts           NoteStore interface + in-memory implementation for tests
   providers/
-    mock.ts               scripted Provider for deterministic tests
-    openrouter.ts          real adapter — streaming SSE, OpenAI-shaped wire format
-  *.test.ts               Jest suite for the above
+    transport.ts         shared SSE reading, fetch injection, HTTP error classification
+    openaiCompatible.ts  the OpenAI-shaped wire format, shared by the two below
+    openrouter.ts        OpenRouter
+    openai.ts            OpenAI
+    anthropic.ts         Anthropic
+    google.ts            Google Gemini
+    mock.ts              scripted Provider for deterministic tests
 
 src/notes/               note storage + pure helpers, no AI
   noteRepository.ts      file-backed CRUD; wraps every FS call as NoteStoreError
-  agentNoteStore.ts       adapts noteRepository to the agent's single-note NoteStore interface
-  title.ts                derives title + preview from body (never stored)
-  undoStack.ts            snapshot undo/redo, pushed at debounced save boundaries
-  trashName.ts            encodes deletion time in trashed filenames (mtime is not a usable proxy)
-  relativeTime.ts          list-row timestamp formatting
-  *.test.ts               Jest suite for the pure pieces above
+  agentNoteStore.ts      adapts noteRepository to the agent's single-note NoteStore
+  title.ts               derives title + preview from body (never stored)
+  undoStack.ts           snapshot undo/redo, pushed at debounced save boundaries
+  trashName.ts           encodes deletion time in trashed filenames
+  changedRange.ts        where two versions of a note differ, for change highlighting
+  relativeTime.ts        list-row timestamp formatting
 
-src/settings/            OpenRouter credentials, dev/test-only .env aside
-  secureSettings.ts       API key + model, OS keychain (expo-secure-store)
-  validateApiKey.ts       one cheap request to confirm a key/model pair works
+src/settings/            provider credentials + model selection
+  providers.ts           the four providers and how each carries its key
+  secureSettings.ts      API keys + selected model, OS keychain (expo-secure-store)
+  buildProvider.ts       picks the adapter for a provider id
+  modelCatalogue.ts      fetches and caches each provider's model list
+  modelList.ts           turns a raw catalogue into the list the picker shows
+  modelSelection.ts      reads a stored selection, tolerating anything unexpected
+  validateApiKey.ts      one cheap request to confirm a key/model pair works
 
 src/theme/               light/dark/system theming, orange accent
-  palette.ts              light/dark color tokens
-  ThemeContext.tsx        provider + useTheme(), persists preference via AsyncStorage
+  palette.ts             light/dark color tokens
+  ThemeContext.tsx       provider + useTheme(), persists preference via AsyncStorage
+  icons.tsx              every icon, named for meaning rather than glyph
 
 src/screens/             app UI
-  NoteListScreen.tsx      flat list, swipe-to-delete + undo snackbar, create FAB
-  NoteEditorScreen.tsx    presentation only — composes the two hooks below
-  useNoteSession.ts       one note's body: debounced saves, lifecycle flush, undo/redo, save errors
-  useAgentTurn.ts         one agent turn: credentials, provider, history, cancel/timeout, error mapping
-  AgentFab.tsx            floating Undo/Redo/Ask-AI cluster; FAB becomes the send button when open
-  SettingsScreen.tsx      API key/model, Appearance (Light/Dark/System), About
+  NoteListScreen.tsx     flat list, swipe-to-delete + undo snackbar, create FAB
+  NoteEditorScreen.tsx   presentation only — composes the two hooks below
+  useNoteSession.ts      one note's body: debounced saves, lifecycle flush, undo/redo
+  useAgentTurn.ts        one agent turn: credentials, provider, history, cancel, errors
+  AgentFab.tsx           floating Undo/Redo/Ask-AI cluster; FAB becomes send when open
+  NoteHighlight.tsx      renders the last turn's changed range in the editor
+  SettingsScreen.tsx     API keys, model, Appearance (Light/Dark/System), About
+  Dropdown.tsx           the inline provider/model pickers in Settings
+  useKeyboardHeight.ts   how much of the screen the keyboard covers, in points
 
-src/app/                 Expo entry shell — plain component-state navigation (no router yet)
-  App.tsx                 root component, screen switch, ThemeProvider
-  index.ts                registerRootComponent; crypto polyfill must stay the first import
-  assets/                 app icons
-
-app.json, package.json        reference src/app/ paths directly (Expo/npm require these at repo root)
-PRD.md                        full product requirements and architecture doc
+src/app/                 Expo entry shell — plain component-state navigation (no router)
+  App.tsx                root component, screen switch, ThemeProvider
+  index.ts               registerRootComponent; crypto polyfill must stay first import
+  assets/                app icons
 ```
+
+`app.json` and `package.json` stay at the repo root and point into `src/app/` — Expo CLI and npm only look for them there.
 
 ## Getting started
 
@@ -85,15 +88,29 @@ npm test          # agent core + notes logic — fast, no simulator, no network
 
 Other scripts: `npm run test:watch`, `npx tsc --noEmit`, `npx expo-doctor`.
 
-## Running the app in the iOS simulator
+## Running the app
 
-**Prerequisite:** Xcode, with iOS platform support installed (Xcode → Settings → Components). You don't need an Apple developer account.
+Two ways to run anotAI, and they are not interchangeable.
+
+| | iOS Simulator | Physical iPhone |
+|---|---|---|
+| Command | `npm run ios` | `npx expo run:ios --device` |
+| What actually runs | Expo Go | a development build you compile yourself |
+| Apple account | none | any Apple ID, free is fine |
+| First run takes | a minute or two | 5–15 min native compile |
+| Verifies native config (`userInterfaceStyle`, permissions) | no | yes |
+
+After the first run, both reload JS from Metro without rebuilding. **Start with the simulator** — it covers almost all day-to-day work.
+
+### iOS Simulator
+
+**Prerequisite:** Xcode, with iOS platform support installed (Xcode → Settings → Components). No Apple developer account needed.
 
 ```bash
 npm run ios
 ```
 
-That starts the Metro dev server, boots a simulator, and opens the app inside Expo Go — installing Expo Go into the simulator on first run. There's no separate build step and nothing to open in Xcode.
+That starts Metro, boots a simulator, and opens the app inside Expo Go — downloading Expo Go into the simulator on first run. There's no build step and nothing to open in Xcode.
 
 You're up when the terminal prints:
 
@@ -101,76 +118,99 @@ You're up when the terminal prints:
 iOS Bundled 6693ms src/app/index.ts (1047 modules)
 ```
 
-Worth waiting for rather than skimming past: that line is the proof every native module resolved in the React Native runtime, which is where this project's failures have actually come from — a clean `tsc` doesn't cover it (PRD §12).
+That line is worth waiting for rather than skimming past: it proves every native module resolved in the React Native runtime, which a clean `tsc` does not cover.
 
 While it runs: `r` reloads the app, `i` reopens the simulator, `Ctrl-C` stops the server.
 
+`npm run android` works the same way. **`npm run web` bundles but notes don't work** — `expo-file-system`'s `File`/`Directory` classes throw on web. Web is a dev convenience, not a target platform (PRD §1).
+
+**What the simulator cannot show you:** `userInterfaceStyle` in `app.json` has no effect under Expo Go, which supplies its own `Info.plist`, so the Light/Dark/System picker can't be fully verified here. Neither can real performance or the real keyboard.
+
+### Physical iPhone, over USB
+
+**Expo Go is not an option on a physical device for this project.** Expo Go has to match the project's SDK, and the App Store build lags: per [Expo's May 2026 changelog](https://expo.dev/changelog/expo-go-and-app-store-may-2026) it was still on SDK 54 while this project is on SDK 57. Building a newer Expo Go yourself needs a paid Apple Developer membership and your own TestFlight; a development build needs only a free Apple ID.
+
+**One-time setup**
+
+1. Xcode, plus Command Line Tools selected in Xcode → Settings → Locations.
+2. An Apple ID added in Xcode → Settings → Accounts. A free one works; the installed app just stops opening after 7 days and needs reinstalling.
+3. **Developer Mode on the phone:** Settings → Privacy & Security → Developer Mode → on. The phone restarts and asks you to confirm.
+4. Plug the phone in, unlock it, and tap **Trust** when it asks about the computer.
+5. If you're not the original author, set `ios.bundleIdentifier` in `app.json` to something unique to you — two people can't install the same bundle id signed by different teams.
+
+**Build and install**
+
+```bash
+npx expo run:ios --device
+```
+
+This prompts you to choose from the connected devices, compiles natively, installs over the cable, and starts Metro. Pass the name to skip the prompt: `npx expo run:ios --device "<your iPhone's name>"`.
+
+**Unlock the phone and keep it awake.** If it's locked, the run fails at the very last step with `Cannot launch anotAI on <device> because the device is locked` — after a full successful compile. The build is cached, so retrying is quick.
+
+On first launch iOS may refuse to open an app signed with a personal certificate. Settings → General → VPN & Device Management → trust your developer certificate. Once only.
+
+After the first install, JS changes need no rebuild — `npm start`, then tap the app icon. Rebuild natively only after changing `app.json`, native config, or adding a native module.
+
+**The cable only installs the binary; Metro still serves your JavaScript over the network.** iOS has no `adb reverse` equivalent, so the phone and the computer must be on the same Wi-Fi. If the app launches but hangs on a blank or red screen, that's this. Where the network blocks it — corporate Wi-Fi with client isolation is the usual culprit — use `npx expo start --tunnel` instead.
+
 ### First run: enabling AI editing
 
-The notes app works immediately, but AI editing is off until you supply a key — the app has no backend and no bundled credentials:
+Applies to both ways of running. The notes app works immediately, but AI editing is off until you supply a key — there's no backend and no bundled credentials.
 
 1. Tap the **gear** on the note list → Settings
-2. Paste an [OpenRouter](https://openrouter.ai/keys) API key (there's a paste button, and an eye toggle to check it)
-3. Pick a model — tap one of the suggestion chips, or type any tool-calling-capable slug from [openrouter.ai/models](https://openrouter.ai/models), e.g. `openai/gpt-4o-mini`. Most non-first-party models need a provider prefix, so check the exact slug there.
-4. **Save**, then **Validate** — validation makes one cheap real request to confirm the key/model pair actually works
+2. Under **API keys**, paste a key next to whichever provider you want to use. Each row has a paste button and an eye toggle. There is no Save button; every edit is written to the keychain as you make it.
+3. Tap the **check** on that row to validate — one cheap real request confirming the key works.
+4. Under **Model**, choose that provider, then pick a model from the list or type an id.
 
-The key goes to the iOS keychain via `expo-secure-store`, never to a file in the repo. The `.env` described below is for `npm run test:live` only and is not read by the app.
+**Every provider spells model ids differently**, and each convention has caused a failed run here: OpenRouter usually wants a provider prefix (`openai/gpt-4o-mini`), OpenAI never does, Anthropic dashes version numbers and never dots them (`claude-haiku-4.5` 404s; `claude-haiku-4-5-20251001` works), and Gemini ids drop the `models/` prefix its catalogue returns. Pick from the list rather than typing where you can. Validating is worth the tap either way: the check sends a real tool call, not just a hello, so a model that can't edit notes fails there rather than on your first edit.
 
-**If paste does nothing in the simulator**, the clipboard genuinely is empty — the simulator has its own pasteboard, separate from the Mac's, and it doesn't always sync. Copy the key on the Mac, then bridge it explicitly:
+Keys go to the OS keychain via `expo-secure-store`, never to a file in the repo.
+
+**If paste does nothing in the simulator**, the clipboard genuinely is empty — the simulator has its own pasteboard. Bridge it explicitly:
 
 ```bash
 pbpaste | xcrun simctl pbcopy booted
 ```
 
-Then open a note, tap the **✦ FAB**, and type an instruction like "turn this into a numbered list".
+Then open a note, tap the **✦ FAB**, and type something like "turn this into a numbered list".
 
-`npm run android` works the same way. **`npm run web` bundles but notes don't work** — `expo-file-system`'s `File`/`Directory` classes throw on web. Web is a dev convenience, not a target platform (PRD §1).
+### Troubleshooting
 
-### Troubleshooting Metro
+**"Build Succeeded" is not the last word.** `expo run:ios` prints it after compiling and still has to install and launch, either of which can fail on its own. Read the final line of the output.
 
-**Keep this repo out of `~/Downloads`, `~/Desktop`, `~/Documents`, and iCloud Drive.** macOS gates FSEvents (what Watchman/Metro use for file-watching) behind a "Full Disk Access" permission for those specific folders; without it, Metro dies with `EMFILE: too many open files, watch` and no clear reason why. Clone/keep this somewhere ordinary, e.g. `~/Developer/anotai`.
+**Don't move the repo after a native build.** CocoaPods bakes absolute paths into ~200 generated files under `ios/`, so relocating the checkout fails the build with an error naming a directory that no longer exists (`React-VFS.yaml ... not found`). Recover with:
 
-**Watchman is required, not an optimization.** Without it Metro falls back to Node's `fs.watch`, which cannot watch a tree this size and dies with `EMFILE: too many open files, watch`. That error is almost always about watchman, not about your file-descriptor limit — raising `ulimit -n` doesn't help, and neither does disabling watchman in a `metro.config.js`.
+```bash
+rm -rf ios/build node_modules/expo-modules-jsi/apple/.DerivedData
+pod install --project-directory=ios
+grep HERMES_CLI_PATH "ios/Pods/Target Support Files/Pods-anotAI/"*.xcconfig
+```
 
-Two failures look identical (`EMFILE`) and have different fixes:
+`pod install` fixes every path except `HERMES_CLI_PATH`, which it can restore from a stale cache — hence the last line; correct it by hand if it still points at the old location. `ios/` is gitignored and entirely generated, so deleting it and rebuilding is always safe. Check `package.json`'s `ios`/`android` scripts afterwards if you do, since `expo prebuild` rewrites them into full native compiles.
 
-| Symptom | Fix |
-|---|---|
-| `Watchman is installed but was likely not enabled when starting Metro, try starting your project again` | Not really an error — Metro's own recovery routine telling you to run the command again. Usually works the second time. |
-| `watchman watch-project .` fails with `FSEventStreamStart failed` — including on `/private/tmp` | **Reboot.** The broken state is in the kernel; restarting the daemon doesn't clear it. Don't grant Full Disk Access, don't reinstall watchman — neither helps. |
-
-`AGENTS.md` has the full diagnosis and the list of workarounds that were tried and don't work, so nobody has to rediscover them.
-
-See `AGENTS.md`'s "Environment gotchas" section for the full list of environment-specific fixes already applied (crypto polyfill, a Node-core-module shim) — you shouldn't need to redo any of them, they're already in the repo.
+**Metro dying with `EMFILE: too many open files`** is almost always watchman, not your file-descriptor limit. Keep the repo out of `~/Downloads`, `~/Desktop`, `~/Documents` and iCloud Drive, which macOS gates behind Full Disk Access. If `watchman watch-project /private/tmp` also fails, reboot — the broken state is in the kernel and restarting the daemon won't clear it. AGENTS.md has the full diagnosis and the list of workarounds that don't work.
 
 ## Environment variables
 
 ```bash
 cp .env.example .env
-# then fill in OPENROUTER_API_KEY and OPENROUTER_DEFAULT_MODEL
 ```
 
-`.env` is gitignored and is a **dev/test-time convenience only** — it's read by `npm run test:live` (below), nothing else. The shipped app never reads API keys from env vars; a user's key is stored in the OS keychain at runtime, set via the in-app Settings screen (PRD §8). `.env.example` documents the naming convention (`<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`) so it extends cleanly as more providers land (PRD §14.1).
+`.env` is gitignored and read only by `npm run test:live`. The shipped app never reads keys from env vars — a user's key lives in the OS keychain, set in Settings (PRD §8). The convention is `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL`, one pair per provider; `.env.example` documents each provider's model-id quirks at the variable that needs it.
 
-## Testing philosophy
-
-The agent core has zero dependency on React or React Native, specifically so it can be tested in Node with no simulator and no network — see PRD §11 and §12 for why this ordering matters. `src/agent/providers/mock.ts` provides a scripted `Provider` so loop behavior (tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback) is fully deterministic in tests.
-
-`npm test` never talks to a real model — it's all against the mock provider. Each of the four provider adapters also has deterministic unit tests covering the wire-format cases a happy-path request never reaches: events fragmented across chunk boundaries, CRLF separators, streams that end without a terminator, tool calls closed with an unexpected terminator, truncated tool-call JSON, and HTTP status→error-kind mapping. `fetch` is injected there rather than stubbed globally.
-
-Separately, **OpenRouter** has been validated against its live API, both via the script below and via a real AI-edited note in the app on an iOS simulator:
+## Testing
 
 ```bash
-npm run test:live
+npm test           # agent core + notes logic — no simulator, no network
+npm run test:live  # one real turn per configured provider — spends money
 ```
 
-This runs one real turn per configured provider (asks the model to add an item to a short list) and prints the resulting note body and status line for you to eyeball. It asserts a tool call actually ran, since a text-only reply means the model never edited anything.
+`npm test` never talks to a real model. The agent core has zero dependency on React or React Native specifically so it can be tested in Node, and `src/agent/providers/mock.ts` is a scripted `Provider` that makes loop behaviour deterministic — tool-call chaining, the forced-rewrite threshold, the iteration cap, cancellation, compaction fallback. Each of the four adapters also has unit tests for the wire-format cases a happy path never reaches: events split across chunk boundaries, CRLF separators, streams ending without a terminator, truncated tool-call JSON, HTTP status mapping. `fetch` is injected rather than stubbed globally.
 
-Each provider is skipped **independently** when its `<PROVIDER>_API_KEY` / `<PROVIDER>_DEFAULT_MODEL` pair is missing from `.env`, so filling in one of the four is fine. It's excluded from `npm test` and from any future CI so it never runs automatically or spends money by accident.
+`npm run test:live` hits the real APIs. It runs one turn per provider and asserts a tool call actually ran, since a text-only reply means the model never edited anything. Each provider is skipped independently when its key pair is missing from `.env`, so filling in one of the four is fine. It's excluded from `npm test` and from CI so it never runs by accident.
 
-**What the live test does not prove:** it runs under Node, where `globalThis.fetch` is undici, so it exercises a different transport than the app. It validates a provider's wire format, not React Native's — which is why the app passes `expo/fetch` into every adapter explicitly (RN's own `fetch` cannot stream at all) and why the SSE edge cases are covered deterministically rather than by the live run.
-
-**Only OpenRouter has actually been run live.** OpenAI, Anthropic and Google Gemini adapters were written from their documented wire formats and are covered deterministically, but no request has been made to them. Anthropic's `partial_json` tool streaming and Gemini's lack of tool-call ids are the two places a documented-vs-actual mismatch would most likely bite. Adding a key for each and running `npm run test:live` is how to close that.
+**It proves less than it looks like it does:** it runs under Node, where `globalThis.fetch` is undici, so it exercises a different transport than the app and says nothing about how the app behaves — only that the wire formats are right. All four providers pass it; OpenRouter has additionally been exercised through the app itself. AGENTS.md records what the first live run turned up, which is the argument for keeping it: three adapters passed every deterministic test and still failed on first contact.
 
 ## License
 
