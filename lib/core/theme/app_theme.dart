@@ -12,9 +12,9 @@ abstract final class AppTheme {
   static ThemeData _build(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
     final scheme = ColorScheme.fromSeed(
-      seedColor: orange,
+      seedColor: const Color(0xFFFB923C),
       brightness: brightness,
-      primary: isDark ? const Color(0xFFFB923C) : orange,
+      primary: const Color(0xFFFB923C),
       surface: isDark ? const Color(0xFF1C1C1E) : Colors.white,
     );
 
