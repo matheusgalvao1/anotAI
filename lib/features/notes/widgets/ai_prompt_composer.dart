@@ -49,12 +49,12 @@ class _AiPromptComposerState extends State<AiPromptComposer> {
     if (!widget.open) {
       return Align(
         alignment: Alignment.bottomRight,
-        child: FloatingActionButton.large(
+        child: FloatingActionButton(
           key: const Key('ai-open-button'),
           heroTag: 'ai-prompt',
           tooltip: 'Ask AI to edit this note',
           onPressed: widget.onOpen,
-          child: const Icon(Icons.auto_awesome_rounded, size: 28),
+          child: const Icon(Icons.auto_awesome_rounded),
         ),
       );
     }
@@ -118,8 +118,7 @@ class _AiPromptComposerState extends State<AiPromptComposer> {
               heroTag: 'send-prompt',
               tooltip: 'Send instruction',
               onPressed: _canSend ? _submit : null,
-              backgroundColor:
-                  _canSend ? colors.primary : colors.surfaceContainerHighest,
+              backgroundColor: _canSend ? colors.primary : colors.surfaceContainerHighest,
               foregroundColor: _canSend ? colors.onPrimary : colors.outline,
               child: const Icon(CupertinoIcons.arrow_up, size: 23),
             ),
