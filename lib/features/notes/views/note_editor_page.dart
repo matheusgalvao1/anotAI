@@ -160,6 +160,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
                   bottom: 14,
                   child: AiPromptComposer(
                     open: _controller.promptOpen,
+                    busy: _controller.promptBusy,
                     focusNode: _promptFocus,
                     status: _controller.promptStatus,
                     onOpen: _openPrompt,

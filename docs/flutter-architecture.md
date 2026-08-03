@@ -7,6 +7,8 @@ this working tree.
 ## MVC boundaries
 
 ```text
+lib/core/widgets/
+  thinking_orb/ theme-aware activity orb shared across features
 lib/features/notes/
   models/       immutable note data and derived title/preview
   data/
@@ -27,12 +29,15 @@ lib/features/notes/
   preserve the exact raw source, so there is no preview/edit synchronization.
 - Opening the AI prompt makes the note read-only and unable to take focus, but
   does not replace its scrollable surface or reset its scroll position.
+- The activity orb is presentation only. It reads the prompt's open/busy state
+  from the editor controller and never triggers work itself.
 
 ## Scope of this slice
 
 The list, create/delete/restore flow, editor, live Markdown styling, appearance
 picker, and AI prompt interaction are implemented. Notes intentionally use an
-in-memory repository and the send action intentionally stops at a UI status.
+in-memory repository and the send action intentionally stops at a placeholder
+delay followed by a UI status.
 File persistence and AI/provider code belong to the next phases.
 
 ## Commands

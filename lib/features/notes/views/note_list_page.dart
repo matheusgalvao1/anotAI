@@ -85,7 +85,8 @@ class _NoteListPageState extends State<NoteListPage> {
         body: AnimatedBuilder(
           animation: widget.controller,
           builder: (context, _) {
-            if (widget.controller.isLoading && widget.controller.notes.isEmpty) {
+            if (widget.controller.isLoading &&
+                widget.controller.notes.isEmpty) {
               return const Center(child: CircularProgressIndicator.adaptive());
             }
             if (widget.controller.error != null) {
@@ -111,7 +112,8 @@ class _NoteListPageState extends State<NoteListPage> {
                       color: Theme.of(context).colorScheme.error,
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: const Icon(CupertinoIcons.delete, color: Colors.white),
+                    child:
+                        const Icon(CupertinoIcons.delete, color: Colors.white),
                   ),
                   child: _NoteRow(note: note, onTap: () => _openNote(note)),
                 );
@@ -169,7 +171,8 @@ class _NoteRow extends StatelessWidget {
                       note.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      style: textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -179,13 +182,14 @@ class _NoteRow extends StatelessWidget {
                       ].join('  ·  '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style:
-                          textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+                      style: textTheme.bodyMedium
+                          ?.copyWith(color: colors.onSurfaceVariant),
                     ),
                   ],
                 ),
               ),
-              Icon(CupertinoIcons.chevron_forward, size: 17, color: colors.outline),
+              Icon(CupertinoIcons.chevron_forward,
+                  size: 17, color: colors.outline),
             ],
           ),
         ),
@@ -210,9 +214,11 @@ class _EmptyState extends StatelessWidget {
                 color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 18),
-              Text('No notes yet', style: Theme.of(context).textTheme.titleLarge),
+              Text('No notes yet',
+                  style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              const Text('Tap + to start writing.', textAlign: TextAlign.center),
+              const Text('Tap + to start writing.',
+                  textAlign: TextAlign.center),
             ],
           ),
         ),

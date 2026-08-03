@@ -1,9 +1,12 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/thinking_orb/thinking_orb.dart';
+
 class AiPromptComposer extends StatefulWidget {
   const AiPromptComposer({
     required this.open,
+    required this.busy,
     required this.focusNode,
     required this.status,
     required this.onOpen,
@@ -13,6 +16,7 @@ class AiPromptComposer extends StatefulWidget {
   });
 
   final bool open;
+  final bool busy;
   final FocusNode focusNode;
   final String? status;
   final VoidCallback onOpen;
@@ -26,7 +30,11 @@ class AiPromptComposer extends StatefulWidget {
 class _AiPromptComposerState extends State<AiPromptComposer> {
   final _promptController = TextEditingController();
 
-  bool get _canSend => _promptController.text.trim().isNotEmpty;
+  static const _triggerDiameter = 56.0;
+  static const _triggerOrbSize = 48.0;
+  static const _inlineOrbSize = 40.0;
+
+  bool get _canSend => !widget.busy && _promptController.text.trim().isNotEmpty;
 
   @override
   void dispose() {
@@ -49,12 +57,30 @@ class _AiPromptComposerState extends State<AiPromptComposer> {
     if (!widget.open) {
       return Align(
         alignment: Alignment.bottomRight,
-        child: FloatingActionButton(
-          key: const Key('ai-open-button'),
-          heroTag: 'ai-prompt',
-          tooltip: 'Ask AI to edit this note',
-          onPressed: widget.onOpen,
-          child: const Icon(Icons.auto_awesome_rounded),
+        child: Tooltip(
+          message: 'Ask AI to edit this note',
+          child: Material(
+            key: const Key('ai-open-button'),
+            elevation: 5,
+            shadowColor: Colors.black.withValues(alpha: 0.25),
+            color: colors.surface,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onOpen,
+              customBorder: const CircleBorder(),
+              child: const SizedBox.square(
+                dimension: _triggerDiameter,
+                child: Center(
+                  child: ThinkingOrb(
+                    state: ThinkingOrbState.composing,
+                    size: _triggerOrbSize,
+                    semanticLabel: 'Ask AI to edit this note',
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       );
     }
@@ -103,10 +129,28 @@ class _AiPromptComposerState extends State<AiPromptComposer> {
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
-                    prefixIcon: IconButton(
-                      tooltip: 'Close prompt',
-                      onPressed: widget.onClose,
-                      icon: const Icon(CupertinoIcons.xmark, size: 18),
+                    // The orb doubles as the close control so the open prompt
+                    // keeps a single leading element.
+                    prefixIcon: Tooltip(
+                      message: 'Close prompt',
+                      child: InkWell(
+                        onTap: widget.onClose,
+                        customBorder: const CircleBorder(),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: ThinkingOrb(
+                            key: const Key('ai-activity-orb'),
+                            state: widget.busy
+                                ? ThinkingOrbState.solving
+                                : ThinkingOrbState.working,
+                            size: _inlineOrbSize,
+                          ),
+                        ),
+                      ),
+                    ),
+                    prefixIconConstraints: const BoxConstraints(
+                      minWidth: 0,
+                      minHeight: 0,
                     ),
                     contentPadding: const EdgeInsets.symmetric(vertical: 15),
                   ),
@@ -115,10 +159,12 @@ class _AiPromptComposerState extends State<AiPromptComposer> {
             ),
             const SizedBox(width: 10),
             FloatingActionButton(
+              key: const Key('ai-send-button'),
               heroTag: 'send-prompt',
               tooltip: 'Send instruction',
               onPressed: _canSend ? _submit : null,
-              backgroundColor: _canSend ? colors.primary : colors.surfaceContainerHighest,
+              backgroundColor:
+                  _canSend ? colors.primary : colors.surfaceContainerHighest,
               foregroundColor: _canSend ? colors.onPrimary : colors.outline,
               child: const Icon(CupertinoIcons.arrow_up, size: 23),
             ),

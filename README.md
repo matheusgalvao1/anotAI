@@ -10,7 +10,8 @@ This branch is the Flutter rewrite. The current milestone is UI-only:
 - one editable, scrollable note surface;
 - live Obsidian-style Markdown formatting without a preview toggle;
 - light, dark, and system appearance modes;
-- an AI floating action button that opens a focused instruction field;
+- an animated thought orb that opens a focused AI instruction field, then sits
+  beside it and switches while an instruction is being worked on;
 - a note that stays scrollable but becomes read-only while that field is open.
 
 Notes currently live in an in-memory repository and reset when the app restarts.
@@ -25,6 +26,7 @@ The UI follows feature-first MVC boundaries:
 lib/
   app/                         app composition
   core/theme/                  shared visual system
+  core/widgets/                shared presentation components
   features/notes/
     models/                    immutable note data
     data/                      repository contracts and implementations
@@ -61,3 +63,10 @@ Use `fvm flutter run -d ios` or `-d android` to select a platform explicitly.
 
 The previous implementation remains available in git history and on the
 original branch if behavioral reference is ever needed.
+
+## Credits
+
+`lib/core/widgets/thinking_orb/` is a Dart port of
+[thinking-orbs](https://github.com/Jakubantalik/thinking-orbs) (MIT © Jakub
+Antalik). The dot fields, depth shading, and preset tunings follow that project;
+the rendering is reimplemented on Flutter's canvas.

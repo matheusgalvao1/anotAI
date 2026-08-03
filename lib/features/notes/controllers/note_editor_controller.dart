@@ -14,14 +14,20 @@ class NoteEditorController extends ChangeNotifier {
 
   static const saveDelay = Duration(milliseconds: 450);
 
+  /// Stands in for the round trip to the AI provider until it is connected.
+  static const placeholderThinkingDelay = Duration(milliseconds: 1400);
+
   final NotesRepository _repository;
   Note _note;
   Timer? _saveTimer;
   bool _promptOpen = false;
+  bool _promptBusy = false;
+  bool _disposed = false;
   String? _promptStatus;
 
   Note get note => _note;
   bool get promptOpen => _promptOpen;
+  bool get promptBusy => _promptBusy;
   String? get promptStatus => _promptStatus;
 
   void updateBody(String body) {
@@ -38,12 +44,21 @@ class NoteEditorController extends ChangeNotifier {
 
   void closePrompt() {
     _promptOpen = false;
+    _promptBusy = false;
     _promptStatus = null;
     notifyListeners();
   }
 
-  void submitPrompt(String prompt) {
-    if (prompt.trim().isEmpty) return;
+  Future<void> submitPrompt(String prompt) async {
+    if (prompt.trim().isEmpty || _promptBusy) return;
+    _promptBusy = true;
+    _promptStatus = null;
+    notifyListeners();
+
+    await Future<void>.delayed(placeholderThinkingDelay);
+    if (_disposed || !_promptBusy) return;
+
+    _promptBusy = false;
     _promptStatus = 'AI editing will be connected in the next phase.';
     notifyListeners();
   }
@@ -58,6 +73,7 @@ class NoteEditorController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _saveTimer?.cancel();
     unawaited(_save());
     super.dispose();
