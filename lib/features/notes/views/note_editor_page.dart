@@ -111,11 +111,22 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
             const SizedBox(width: 8),
           ],
         ),
-        body: SafeArea(
-          top: false,
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) => Stack(
+        // Note content paints edge-to-edge (including under the home
+        // indicator). Only the floating composer is inset for safe area —
+        // no opaque dock behind it.
+        body: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            final bottomSafe = MediaQuery.paddingOf(context).bottom;
+            // Only clear the prompt input row (FAB-sized). Status can overlay
+            // the note — no extra reserved gap above the field.
+            const promptRowHeight = 56.0;
+            const promptBottomGap = 14.0;
+            final bottomInset = _controller.promptOpen
+                ? promptBottomGap + promptRowHeight + bottomSafe
+                : 18.0;
+
+            return Stack(
               children: [
                 Positioned.fill(
                   child: TextField(
@@ -141,23 +152,26 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
                     ),
                     cursorColor: colors.primary,
                     cursorWidth: 2,
-                    scrollPadding: const EdgeInsets.only(bottom: 150),
+                    scrollPadding: EdgeInsets.only(bottom: bottomInset),
                     decoration: InputDecoration(
                       hintText: 'Start writing…',
                       hintStyle: TextStyle(color: colors.outline),
-                      filled: false,
+                      // Defeat the global filled InputDecorationTheme so the
+                      // editor stays visually continuous with the scaffold.
+                      filled: true,
+                      fillColor: Colors.transparent,
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
                       contentPadding:
-                          const EdgeInsets.fromLTRB(22, 18, 22, 150),
+                          EdgeInsets.fromLTRB(22, 18, 22, bottomInset),
                     ),
                   ),
                 ),
                 Positioned(
                   left: 16,
                   right: 16,
-                  bottom: 14,
+                  bottom: 14 + bottomSafe,
                   child: AiPromptComposer(
                     open: _controller.promptOpen,
                     busy: _controller.promptBusy,
@@ -169,8 +183,8 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
                   ),
                 ),
               ],
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
