@@ -87,7 +87,7 @@ void main() {
     expect(find.textContaining('next phase'), findsOneWidget);
   });
 
-  testWidgets('tapping the orb closes the prompt', (tester) async {
+  testWidgets('tapping the orb does not close the prompt', (tester) async {
     await _mountEditor(tester);
 
     await tester.tap(find.byKey(const Key('ai-open-button')));
@@ -97,9 +97,34 @@ void main() {
     await tester.tap(find.byKey(const Key('ai-activity-orb')));
     await _pumpFrames(tester);
 
+    expect(find.byKey(const Key('ai-prompt-input')), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byKey(const Key('note-editor'))).readOnly,
+      isTrue,
+    );
+  });
+
+  testWidgets('tapping done closes the prompt', (tester) async {
+    await _mountEditor(tester);
+
+    await tester.tap(find.byKey(const Key('ai-open-button')));
+    await _pumpFrames(tester);
+    expect(find.byKey(const Key('ai-prompt-input')), findsOneWidget);
+    expect(find.byKey(const Key('editor-done-button')), findsOneWidget);
+
+    // Mimic dismissing the keyboard first by tapping the note while the
+    // prompt stays open, then finishing with Done.
+    await tester.tap(find.byKey(const Key('note-editor')));
+    await _pumpFrames(tester);
+    expect(find.byKey(const Key('ai-prompt-input')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('editor-done-button')));
+    await _pumpFrames(tester);
+
     expect(find.byKey(const Key('ai-prompt-input')), findsNothing);
     final editor =
         tester.widget<TextField>(find.byKey(const Key('note-editor')));
     expect(editor.readOnly, isFalse);
+    expect(editor.focusNode!.hasFocus, isFalse);
   });
 }

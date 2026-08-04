@@ -74,8 +74,15 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
 
   void _closePrompt() {
     _promptFocus.unfocus();
-    _noteFocus.canRequestFocus = true;
     _controller.closePrompt();
+    // Re-enable note focus for later taps, but do not resume editing —
+    // otherwise focus leaves the prompt and the note keyboard pops open.
+    _noteFocus.canRequestFocus = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _noteFocus.unfocus();
+      FocusManager.instance.primaryFocus?.unfocus();
+    });
   }
 
   Future<void> _goBack() async {
@@ -83,50 +90,76 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  void _onDone() {
+    if (_controller.promptOpen) {
+      _closePrompt();
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) unawaited(_controller.flush());
       },
-      child: Scaffold(
-        resizeToAvoidBottomInset: true,
-        appBar: AppBar(
-          leadingWidth: 104,
-          leading: TextButton.icon(
-            onPressed: _goBack,
-            icon: const Icon(CupertinoIcons.chevron_back, size: 20),
-            label: const Text('Notes'),
-          ),
-          actions: [
-            if (keyboardVisible)
-              IconButton(
-                tooltip: 'Hide keyboard',
-                onPressed: () => FocusManager.instance.primaryFocus?.unfocus(),
-                icon: const Icon(Icons.keyboard_hide_rounded),
-              ),
-            const SizedBox(width: 8),
-          ],
-        ),
-        // Note content paints edge-to-edge (including under the home
-        // indicator). Only the floating composer is inset for safe area —
-        // no opaque dock behind it.
-        body: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, _) {
-            final bottomSafe = MediaQuery.paddingOf(context).bottom;
-            // Only clear the prompt input row (FAB-sized). Status can overlay
-            // the note — no extra reserved gap above the field.
-            const promptRowHeight = 56.0;
-            const promptBottomGap = 14.0;
-            final bottomInset = _controller.promptOpen
-                ? promptBottomGap + promptRowHeight + bottomSafe
-                : 18.0;
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+          final showDone = keyboardVisible || _controller.promptOpen;
+          final bottomSafe = MediaQuery.paddingOf(context).bottom;
+          // Clear the open prompt row. Status can overlay the note.
+          const promptRowHeight = 56.0;
+          const promptBottomGap = 14.0;
+          final bottomInset = _controller.promptOpen
+              ? promptBottomGap + promptRowHeight + bottomSafe
+              : 18.0;
 
-            return Stack(
+          return Scaffold(
+            resizeToAvoidBottomInset: true,
+            appBar: AppBar(
+              leadingWidth: 104,
+              leading: TextButton.icon(
+                onPressed: _goBack,
+                icon: const Icon(CupertinoIcons.chevron_back, size: 20),
+                label: const Text('Notes'),
+              ),
+              actions: [
+                if (showDone)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: Tooltip(
+                      message: 'Done',
+                      child: Material(
+                        key: const Key('editor-done-button'),
+                        color: colors.primary,
+                        shape: const CircleBorder(),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: _onDone,
+                          customBorder: const CircleBorder(),
+                          child: SizedBox.square(
+                            dimension: 32,
+                            child: Icon(
+                              CupertinoIcons.checkmark,
+                              size: 17,
+                              color: colors.onPrimary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            // Note content paints edge-to-edge (including under the home
+            // indicator). Only the floating composer is inset for safe area —
+            // no opaque dock behind it.
+            body: Stack(
               children: [
                 Positioned.fill(
                   child: TextField(
@@ -178,14 +211,13 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
                     focusNode: _promptFocus,
                     status: _controller.promptStatus,
                     onOpen: _openPrompt,
-                    onClose: _closePrompt,
                     onSubmit: _controller.submitPrompt,
                   ),
                 ),
               ],
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
     );
   }

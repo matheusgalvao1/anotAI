@@ -10,7 +10,6 @@ class AiPromptComposer extends StatefulWidget {
     required this.focusNode,
     required this.status,
     required this.onOpen,
-    required this.onClose,
     required this.onSubmit,
     super.key,
   });
@@ -20,7 +19,6 @@ class AiPromptComposer extends StatefulWidget {
   final FocusNode focusNode;
   final String? status;
   final VoidCallback onOpen;
-  final VoidCallback onClose;
   final ValueChanged<String> onSubmit;
 
   @override
@@ -129,23 +127,14 @@ class _AiPromptComposerState extends State<AiPromptComposer> {
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
-                    // The orb doubles as the close control so the open prompt
-                    // keeps a single leading element.
-                    prefixIcon: Tooltip(
-                      message: 'Close prompt',
-                      child: InkWell(
-                        onTap: widget.onClose,
-                        customBorder: const CircleBorder(),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: ThinkingOrb(
-                            key: const Key('ai-activity-orb'),
-                            state: widget.busy
-                                ? ThinkingOrbState.solving
-                                : ThinkingOrbState.working,
-                            size: _inlineOrbSize,
-                          ),
-                        ),
+                    prefixIcon: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: ThinkingOrb(
+                        key: const Key('ai-activity-orb'),
+                        state: widget.busy
+                            ? ThinkingOrbState.solving
+                            : ThinkingOrbState.working,
+                        size: _inlineOrbSize,
                       ),
                     ),
                     prefixIconConstraints: const BoxConstraints(
