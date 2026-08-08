@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,8 @@ import 'package:anotai/features/ai/models/ai_allow_list.dart'
     show ReasoningMode;
 import 'package:anotai/features/ai/models/provider_id.dart';
 import 'package:anotai/features/ai/models/selection.dart';
+import 'package:anotai/features/notes/data/file_notes_repository.dart';
+import 'package:anotai/features/notes/data/note_transfer.dart';
 import 'package:anotai/features/settings/controllers/appearance_controller.dart';
 import 'package:anotai/features/settings/views/settings_page.dart';
 
@@ -148,5 +151,37 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
     expect(find.text('Choose a model'), findsOneWidget);
+  });
+
+  testWidgets('importing notes invokes the refresh callback', (tester) async {
+    final settings = await _loaded(_controllerWith());
+
+    // No real file I/O runs here (widget-test fake async): the picker returns
+    // no paths and the repository root is never touched, so the only thing we
+    // verify is that the refresh callback fires after an import attempt.
+    var refreshed = 0;
+    final transfer = NoteTransfer(
+      notesRepository: FileNotesRepository(Directory(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}anotai-widget-test')),
+      pickMarkdownFiles: () async => const [],
+      shareFiles: (paths, origin) async {},
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsPage(
+        controller: AppearanceController(),
+        settingsController: settings,
+        noteTransfer: transfer,
+        onNotesImported: () => refreshed++,
+      ),
+    ));
+
+    await tester.ensureVisible(find.text('Import'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import'));
+    await tester.pumpAndSettle();
+
+    expect(refreshed, 1);
+    expect(find.text('Notes imported.'), findsOneWidget);
   });
 }

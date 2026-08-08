@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -64,9 +65,13 @@ class _AnotaiAppState extends State<AnotaiApp> {
   }
 
   Future<List<String>> _pickMarkdownFiles() async {
+    // iOS needs explicit uniform type identifiers (it throws when a type group
+    // only carries extensions), while Android filters by extension. Only the
+    // markdown UTI is allowed, so the picker offers .md files, not all text.
     const typeGroup = XTypeGroup(
       label: 'Markdown',
       extensions: ['md'],
+      uniformTypeIdentifiers: ['net.daringfireball.markdown'],
     );
     final files = await openFiles(acceptedTypeGroups: const [typeGroup]);
     return files
@@ -142,6 +147,8 @@ class _AnotaiAppState extends State<AnotaiApp> {
                             controller: _appearanceController,
                             settingsController: settingsController,
                             noteTransfer: noteTransfer,
+                            onNotesImported: () =>
+                                unawaited(notesController.load()),
                           ),
                         ),
                       );
