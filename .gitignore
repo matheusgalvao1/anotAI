@@ -1,45 +1,55 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+Thumbs.db
+migrate_working_dir/
 
-# dependencies
-node_modules/
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
 
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
+# The .vscode folder may contain useful shared launch configurations and tasks,
+# so it is intentionally not ignored by default.
 
-# Native
-.kotlin/
-*.orig.*
+# Flutter, Dart, and Pub
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# FVM: .fvmrc is tracked; SDK links and machine-local state are not.
+.fvm/
+
+# Symbolication and obfuscation outputs
+app.*.symbols
+app.*.map.json
+
+# Android Studio build artifacts
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Local secrets and signing material
+.env*
 *.jks
+*.keystore
+*.key
 *.p8
 *.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
 *.pem
-
-# local env files (API keys etc. must never be committed)
-# Everything but the checked-in template: `.env` and `.env*.local` alone left
-# ordinary variants like `.env.bak` or `.env.openai` committable, which is a
-# one-typo route to publishing a key.
-.env*
-!.env.example
-
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/ios
-/android
+*.mobileprovision

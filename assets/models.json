@@ -1,0 +1,32 @@
+{
+  "providers": [
+    { "id": "openrouter", "label": "OpenRouter", "keyPlaceholder": "sk-or-v1-…" },
+    { "id": "openai", "label": "OpenAI", "keyPlaceholder": "sk-…" },
+    { "id": "anthropic", "label": "Anthropic", "keyPlaceholder": "sk-ant-…" },
+    { "id": "google", "label": "Google Gemini", "keyPlaceholder": "AIza…" }
+  ],
+  "models": [
+    { "id": "openai/gpt-5.6-sol", "label": "GPT 5.6 Sol", "provider": "openrouter", "reasoning": { "modes": ["minimal", "low", "medium", "high"], "default": "medium" } },
+    { "id": "openai/gpt-5.6-terra", "label": "GPT 5.6 Terra", "provider": "openrouter", "reasoning": { "modes": ["minimal", "low", "medium", "high"], "default": "medium" } },
+    { "id": "openai/gpt-5.6-luna", "label": "GPT 5.6 Luna", "provider": "openrouter", "reasoning": { "modes": ["minimal", "low", "medium", "high"], "default": "medium" } },
+    { "id": "anthropic/claude-opus-5", "label": "Claude Opus 5", "provider": "openrouter", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "anthropic/claude-sonnet-5", "label": "Claude Sonnet 5", "provider": "openrouter", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "anthropic/claude-haiku-4.5", "label": "Claude Haiku 4.5", "provider": "openrouter", "reasoning": { "modes": ["disabled", "enabled"], "default": "enabled" } },
+    { "id": "google/gemini-3.6-flash", "label": "Gemini 3.6 Flash", "provider": "openrouter", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "google/gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "provider": "openrouter", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash", "provider": "openrouter", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "z-ai/glm-5.2", "label": "GLM 5.2", "provider": "openrouter", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "poolside/laguna-s-2.1", "label": "Laguna S 2.1", "provider": "openrouter", "reasoning": { "modes": ["disabled", "enabled"], "default": "enabled" } },
+
+    { "id": "gpt-5.6-sol", "label": "GPT 5.6 Sol", "provider": "openai", "reasoning": { "modes": ["minimal", "low", "medium", "high"], "default": "medium" } },
+    { "id": "gpt-5.6-terra", "label": "GPT 5.6 Terra", "provider": "openai", "reasoning": { "modes": ["minimal", "low", "medium", "high"], "default": "medium" } },
+    { "id": "gpt-5.6-luna", "label": "GPT 5.6 Luna", "provider": "openai", "reasoning": { "modes": ["minimal", "low", "medium", "high"], "default": "medium" } },
+
+    { "id": "claude-opus-5", "label": "Claude Opus 5", "provider": "anthropic", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "provider": "anthropic", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "claude-haiku-4.5", "label": "Claude Haiku 4.5", "provider": "anthropic", "reasoning": { "modes": ["disabled", "enabled"], "default": "enabled" } },
+
+    { "id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash", "provider": "google", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } },
+    { "id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "provider": "google", "reasoning": { "modes": ["disabled", "low", "medium", "high"], "default": "medium" } }
+  ]
+}
