@@ -47,19 +47,29 @@ class _NoteListPageState extends State<NoteListPage> {
   }
 
   Future<void> _deleteNote(Note note) async {
-    final deleted = await widget.controller.deleteNote(note.id);
-    if (!mounted || deleted == null) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('Deleted “${deleted.title}”'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () => widget.controller.restoreNote(deleted),
+    await widget.controller.deleteNote(note.id);
+  }
+
+  Future<bool> _confirmDelete(Note note) async {
+    if (!mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete note?'),
+        content: Text('“${note.title}” will be permanently deleted.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
           ),
-        ),
-      );
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   @override
@@ -104,6 +114,7 @@ class _NoteListPageState extends State<NoteListPage> {
                 return Dismissible(
                   key: ValueKey(note.id),
                   direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) => _confirmDelete(note),
                   onDismissed: (_) => _deleteNote(note),
                   background: Container(
                     alignment: Alignment.centerRight,

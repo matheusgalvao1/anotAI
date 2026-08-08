@@ -5,17 +5,27 @@ import '../../ai/controllers/settings_controller.dart';
 import '../../ai/models/ai_allow_list.dart';
 import '../../ai/models/provider_id.dart';
 import '../../ai/models/selection.dart';
+import '../../notes/data/note_transfer.dart';
 import '../controllers/appearance_controller.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({
     required this.controller,
     required this.settingsController,
+    this.noteTransfer,
+    this.onNotesImported,
     super.key,
   });
 
   final AppearanceController controller;
   final SettingsController settingsController;
+
+  /// When present, renders the Storage section (import/export) backed by the
+  /// platform file picker and share sheet.
+  final NoteTransfer? noteTransfer;
+
+  /// Invoked after an import so the notes list refreshes.
+  final VoidCallback? onNotesImported;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -68,6 +78,24 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 20),
             if (widget.settingsController.allowList != null)
               _AiSections(settingsController: widget.settingsController),
+            if (widget.noteTransfer case final transfer?) ...[
+              const SizedBox(height: 20),
+              _Section(
+                title: 'Storage',
+                child: _StorageSection(
+                  transfer: transfer,
+                  onImported: () {
+                    widget.onNotesImported?.call();
+                    final messenger = ScaffoldMessenger.of(context);
+                    messenger
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        const SnackBar(content: Text('Notes imported.')),
+                      );
+                  },
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             const _Section(
               title: 'About',
@@ -237,6 +265,60 @@ class _ModelConfig extends StatelessWidget {
 
 ReasoningMode _keepReasoning(AiModel picked, ReasoningMode current) =>
     picked.reasoningModes.contains(current) ? current : picked.defaultReasoning;
+
+class _StorageSection extends StatelessWidget {
+  const _StorageSection({required this.transfer, required this.onImported});
+
+  final NoteTransfer transfer;
+  final VoidCallback onImported;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.folder_outlined, color: colors.primary),
+          title: const Text('Notes folder'),
+          subtitle: Text(
+            transfer.storagePath,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => _import(context),
+              icon: const Icon(Icons.file_download_outlined, size: 18),
+              label: const Text('Import'),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: () => _export(context),
+              icon: const Icon(Icons.ios_share, size: 18),
+              label: const Text('Export all'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _import(BuildContext context) async {
+    await transfer.importNotes();
+    if (context.mounted) onImported();
+  }
+
+  Future<void> _export(BuildContext context) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final origin =
+        box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+    await transfer.exportAll(sharePositionOrigin: origin);
+  }
+}
 
 class _ProviderKeyTile extends StatelessWidget {
   const _ProviderKeyTile({

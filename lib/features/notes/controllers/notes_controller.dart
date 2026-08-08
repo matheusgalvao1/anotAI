@@ -43,9 +43,4 @@ class NotesController extends ChangeNotifier {
     await load();
     return deleted;
   }
-
-  Future<void> restoreNote(Note note) async {
-    await _repository.save(note);
-    await load();
-  }
 }

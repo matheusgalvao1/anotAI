@@ -8,10 +8,13 @@ environment:
 
 dependencies:
   cupertino_icons: ^1.0.9
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
   flutter_secure_storage: ^11.0.0
   http: ^1.6.0
+  path_provider: ^2.1.6
+  share_plus: ^13.3.0
 
 dev_dependencies:
   flutter_test:
