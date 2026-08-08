@@ -39,6 +39,9 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
         codeBackground: Color(0xFFF1F1F1),
       ),
     );
+    // Agent-written bodies replace the visible text (which the user isn't
+    // editing while the prompt is open) and let the markdown spans recompute.
+    _controller.onBodyReplaced = _replaceEditorBody;
 
     if (_controller.note.body.isEmpty) {
       WidgetsBinding.instance
@@ -96,6 +99,11 @@ class _NoteEditorPageState extends State<NoteEditorPage> {
       return;
     }
     FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  void _replaceEditorBody(String body) {
+    if (_textController.text == body) return;
+    _textController.text = body;
   }
 
   @override
