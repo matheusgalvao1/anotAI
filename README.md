@@ -4,7 +4,7 @@ anotAI is a local-first notes app for iOS and Android. It aims to feel like a
 fast, ordinary phone notes app while adding an AI instruction surface that can
 edit the open note directly.
 
-This branch is the Flutter rewrite. The current milestone is UI-only:
+This branch is the Flutter rewrite. Current features:
 
 - note list with create, swipe-to-delete, and undo;
 - one editable, scrollable note surface;
@@ -12,11 +12,14 @@ This branch is the Flutter rewrite. The current milestone is UI-only:
 - light, dark, and system appearance modes;
 - an animated thought orb that opens a focused AI instruction field, then sits
   beside it and switches while an instruction is being worked on;
-- a note that stays scrollable but becomes read-only while that field is open.
+- a note that stays scrollable but becomes read-only while that field is open;
+- an AI editing agent (ported from the original branch) that runs real
+  tool-calling turns against a hardcoded model allow list: OpenAI, Anthropic,
+  Google, or OpenRouter, configured in Settings along with connection and
+  reasoning effort. API keys are kept in the OS keychain.
 
 Notes currently live in an in-memory repository and reset when the app restarts.
-Local markdown-file persistence and AI providers are the next implementation
-phases.
+Local markdown-file persistence is the next implementation phase.
 
 ## Architecture
 
@@ -33,6 +36,11 @@ lib/
     controllers/               screen state and use-case coordination
     views/                     pages and navigation
     widgets/                   live Markdown editor and AI composer
+  features/ai/
+    models/                    allow-list types and model selection
+    data/                      agent core (framework-free loop + provider
+                               adapters), settings/keychain stores
+    controllers/               settings + agent controllers
   features/settings/
     controllers/
     views/
