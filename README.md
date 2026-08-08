@@ -6,7 +6,7 @@ open note directly.
 
 ## Features
 
-- note list with create, swipe-to-delete, and undo;
+- note list with create and swipe-to-delete backed by a confirmation dialog;
 - one editable, scrollable note surface;
 - live Obsidian-style Markdown formatting without a preview toggle;
 - light, dark, and system appearance modes;
@@ -18,8 +18,19 @@ open note directly.
   Anthropic, Google, or OpenRouter — plus per-model reasoning-effort selection;
 - provider API keys kept in the OS keychain, never in app storage.
 
-Notes currently live in an in-memory repository and reset when the app
-restarts. Local markdown-file persistence is the next implementation phase.
+## Storage
+
+Notes persist as portable markdown files — one per note under the app's
+`Notes` folder, with a small metadata block (id, created/updated dates) above
+the body. The id owns the filename, so retitling a note never moves its file,
+and files renamed elsewhere on disk keep their identity. Writes are atomic, so
+a crash can't corrupt a note.
+
+The metadata block is an internal detail: **Export all** shares clean copies
+named after each note's title (`grocery-list.md`) with just the markdown
+content, and **Import** adopts any picked `.md` file as a new note. Both go
+through the system file picker / share sheet with an identical experience on
+iOS and Android.
 
 ## Architecture
 

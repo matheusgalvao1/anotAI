@@ -1,8 +1,4 @@
-# Flutter rewrite architecture
-
-This branch is a clean Flutter implementation. Historical behavior remains
-available from the original branch and git history, not as a second runtime in
-this working tree.
+# anotAI architecture
 
 ## MVC boundaries
 
@@ -13,7 +9,10 @@ lib/features/notes/
   models/       immutable note data and derived title/preview
   data/
     notes_repository.dart            storage contract
-    in_memory_notes_repository.dart  temporary UI-stage implementation
+    in_memory_notes_repository.dart  test double only
+    markdown_frontmatter.dart        note-file metadata block (parse/serialize)
+    file_notes_repository.dart       markdown-file storage implementation
+    note_transfer.dart               import/export through pickers and share sheet
   controllers/  list/editor state, save scheduling, prompt mode
   views/        screen composition and navigation
   widgets/      reusable editor and prompt presentation
@@ -23,8 +22,10 @@ lib/features/notes/
 - Controllers know repository interfaces, never concrete persistence details.
 - The app composition root creates concrete repositories and injects
   repository-backed controllers into views.
-- The `NotesRepository` contract is the seam for the next local markdown-file
-  implementation.
+- Notes persist as markdown files under `Documents/Notes/` (one `<id>.md` per
+  note with a small frontmatter block). Writes are atomic (temp file + rename),
+  deletes are permanent after confirmation, and files moved or edited in the OS
+  are handled gracefully — the id lives in the frontmatter, not the filename.
 - The live Markdown editor uses a single `TextField`. Styled spans always
   preserve the exact raw source, so there is no preview/edit synchronization.
 - Opening the AI prompt makes the note read-only and unable to take focus, but
@@ -34,11 +35,9 @@ lib/features/notes/
 
 ## Scope of this slice
 
-The list, create/delete/restore flow, editor, live Markdown styling, appearance
-picker, and AI prompt interaction are implemented. Notes intentionally use an
-in-memory repository and the send action intentionally stops at a placeholder
-delay followed by a UI status.
-File persistence and AI/provider code belong to the next phases.
+The list, create/confirm-delete flow, editor, live Markdown styling, appearance
+picker, markdown-file persistence with import/export, and the AI prompt
+interaction are implemented. Notes persist as real markdown files.
 
 ## Commands
 

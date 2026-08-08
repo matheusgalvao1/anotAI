@@ -5,11 +5,34 @@ or required verification step changes.
 
 ## Product stage
 
-anotAI is a Flutter notes app for iOS and Android. Notes storage is still
-in-memory behind `NotesRepository`, and the AI send action now runs the real
-agent loop (ported from the original branch) with provider/model configuration
-in Settings. The old implementation is not part of this branch; use git history
-or the original branch for historical agent behavior.
+anotAI is a Flutter notes app for iOS and Android. Notes persist as markdown
+files behind `NotesRepository` (see the note-persistence rules below), and the
+AI send action runs the real agent loop (ported from the original branch) with
+provider/model configuration in Settings. The old implementation is not part
+of this branch; use git history or the original branch for historical agent
+behavior.
+
+## Note persistence
+
+Notes are real, portable markdown files: one file per note under the app's
+`Documents/Notes/` root, named `<id>.md` (id = `markdown_frontmatter.dart`
+carrying `id`, `created_at`, and `updated_at` above the body).
+
+- `FileNotesRepository` is the only production repository;
+  `InMemoryNotesRepository` is a test double.
+- The id owns the filename and never changes when the note is retitled — a
+  title edit never moves a file, so internal names stay opaque and stable.
+  Files the user moves or renames in the OS still keep their identity
+  (`find`/`save`/`delete` fall back to a frontmatter scan), and foreign files
+  without frontmatter still load with a filename-derived id.
+- Writes are atomic (temp file + rename). Deletes are permanent after the
+  confirmation dialog — there is no trash and no undo flow.
+- The friendly slug is an export-only concern (`note_transfer.dart`): exports
+  share temp copies named after each note's title with **no frontmatter**, just
+  the body; imports adopt every picked file as a new note and the app writes
+  its own frontmatter. Import/export goes through the system file picker and
+  share sheet, identically on iOS and Android; there is no folder picker and no
+  platform-conditional storage code.
 
 ## AI agent architecture
 
