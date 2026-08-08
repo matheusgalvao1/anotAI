@@ -1,10 +1,10 @@
 # anotAI
 
-anotAI is a local-first notes app for iOS and Android. It aims to feel like a
-fast, ordinary phone notes app while adding an AI instruction surface that can
-edit the open note directly.
+anotAI is a local-first notes app for iOS and Android. It feels like a fast,
+ordinary phone notes app and adds an AI instruction surface that edits the
+open note directly.
 
-This branch is the Flutter rewrite. Current features:
+## Features
 
 - note list with create, swipe-to-delete, and undo;
 - one editable, scrollable note surface;
@@ -13,17 +13,17 @@ This branch is the Flutter rewrite. Current features:
 - an animated thought orb that opens a focused AI instruction field, then sits
   beside it and switches while an instruction is being worked on;
 - a note that stays scrollable but becomes read-only while that field is open;
-- an AI editing agent (ported from the original branch) that runs real
-  tool-calling turns against a hardcoded model allow list: OpenAI, Anthropic,
-  Google, or OpenRouter, configured in Settings along with connection and
-  reasoning effort. API keys are kept in the OS keychain.
+- an AI editing agent that runs real tool-calling turns: read, rewrite, and
+  patch the open note with a hardcoded model allow list served by OpenAI,
+  Anthropic, Google, or OpenRouter — plus per-model reasoning-effort selection;
+- provider API keys kept in the OS keychain, never in app storage.
 
-Notes currently live in an in-memory repository and reset when the app restarts.
-Local markdown-file persistence is the next implementation phase.
+Notes currently live in an in-memory repository and reset when the app
+restarts. Local markdown-file persistence is the next implementation phase.
 
 ## Architecture
 
-The UI follows feature-first MVC boundaries:
+The app follows feature-first MVC boundaries:
 
 ```text
 lib/
@@ -46,8 +46,9 @@ lib/
     views/
 ```
 
-See [docs/flutter-architecture.md](docs/flutter-architecture.md) for the key
-interaction and dependency rules.
+The agent core is deliberately framework-free: views never touch the loop or
+the provider adapters, and the model allow list in `assets/models.json` is the
+single place a new model gets added.
 
 ## Setup
 
@@ -69,8 +70,9 @@ fvm flutter test
 
 Use `fvm flutter run -d ios` or `-d android` to select a platform explicitly.
 
-The previous implementation remains available in git history and on the
-original branch if behavioral reference is ever needed.
+## License
+
+[MIT](LICENSE) © 2026 Matheus Galvão
 
 ## Credits
 
