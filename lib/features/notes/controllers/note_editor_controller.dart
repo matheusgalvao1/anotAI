@@ -104,7 +104,7 @@ class NoteEditorController extends ChangeNotifier {
       _promptStatus = 'AI editing failed: $error';
     } finally {
       _promptBusy = false;
-      notifyListeners();
+      if (hasListeners) notifyListeners();
     }
   }
 
